@@ -1,10 +1,11 @@
 /* 极简离线缓存：让加到主屏幕的 App 断网也能打开 */
 
-const CACHE = 'myapp-v1';
+const CACHE = 'myapp-v2';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
+  './features.js',
   './app.js',
   './manifest.webmanifest',
   './icons/icon-180.png',

@@ -1,13 +1,13 @@
 {
   "name": "MyApp",
   "short_name": "MyApp",
-  "description": "自用 iPad 应用",
+  "description": "自用 iPad 工具箱：房贷、单位换算、日期、文本、密码、随机决策",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#F2F2F7",
-  "theme_color": "#F97316",
+  "background_color": "#050B1A",
+  "theme_color": "#050B1A",
   "lang": "zh-CN",
   "icons": [
     {

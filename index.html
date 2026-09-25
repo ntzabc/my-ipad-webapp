@@ -8,108 +8,120 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="MyApp">
 <meta name="format-detection" content="telephone=no">
+<meta name="color-scheme" content="dark">
 <title>MyApp</title>
-<meta name="description" content="自用 iPad 应用">
+<meta name="description" content="自用 iPad 工具箱">
 
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#F97316" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#050B1A">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+<!-- 背景光斑：玻璃要"有东西可折射"才像真的 -->
+<div class="aurora" aria-hidden="true">
+  <span class="aurora__blob aurora__blob--1"></span>
+  <span class="aurora__blob aurora__blob--2"></span>
+  <span class="aurora__blob aurora__blob--3"></span>
+  <span class="aurora__grain"></span>
+</div>
+
 <div class="app">
 
-  <!-- 顶部标题栏 -->
-  <header class="topbar">
-    <h1 class="topbar__title" id="topbarTitle">首页</h1>
+  <!-- ============ 顶部：标题 + 功能搜索 ============ -->
+  <header class="topbar glass" id="topbar">
+    <div class="topbar__row">
+      <h1 class="topbar__title" id="topbarTitle">功能</h1>
+      <span class="topbar__count" id="topbarCount"></span>
+    </div>
+
+    <label class="searchbar" id="searchWrap">
+      <svg class="searchbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="11" cy="11" r="6.5"/><path d="M16.2 16.2 20.5 20.5"/>
+      </svg>
+      <input id="search" type="search" placeholder="搜索功能，如「房贷」「大写」「时区」"
+             autocomplete="off" autocorrect="off" autocapitalize="off" enterkeyhint="search" spellcheck="false">
+      <button class="searchbar__clear" id="searchClear" type="button" aria-label="清空" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M7 7l10 10M17 7 7 17"/>
+        </svg>
+      </button>
+    </label>
   </header>
 
-  <!-- 页面容器 -->
+  <!-- ============ 中间：功能板块 ============ -->
   <main class="screens" id="screens">
 
     <section class="screen is-active" id="screen-home">
-      <div class="stack">
-
-        <div class="card">
-          <div class="card__label">当前时间</div>
-          <div class="clock" id="clock">--:--:--</div>
-          <div class="card__hint">秒数在跳 = 页面脚本正常运行</div>
-        </div>
-
-        <div class="card">
-          <div class="card__label">状态</div>
-          <div class="row">
-            <span class="dot"></span>
-            <span id="engineStatus">骨架已就绪，等待应用内容</span>
-          </div>
-          <div class="card__hint" id="displayMode">运行模式检测中…</div>
-        </div>
-
-      </div>
+      <div id="featureList" class="groups"></div>
     </section>
 
-    <section class="screen" id="screen-tools">
-      <div class="empty">
-        <svg class="empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
-          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
-          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
-          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
-        </svg>
-        <div class="empty__title">功能还没填</div>
-        <div class="empty__desc">等你说完要做什么，我把具体界面写到这里</div>
-      </div>
+    <section class="screen" id="screen-fav">
+      <div id="favList" class="groups"></div>
     </section>
 
     <section class="screen" id="screen-settings">
       <div class="stack">
 
         <div class="card">
-          <div class="card__label">外观</div>
-          <div class="segmented" id="themeSeg">
-            <button class="segmented__item is-active" data-theme="auto">跟随系统</button>
-            <button class="segmented__item" data-theme="light">浅色</button>
-            <button class="segmented__item" data-theme="dark">深色</button>
-          </div>
+          <div class="card__label">玻璃效果</div>
+          <label class="switch">
+            <span class="switch__text">
+              <b>极致玻璃</b>
+              <small>给每张卡片都开真实背景模糊。好看，但滚动时更吃 GPU——卡就关掉。</small>
+            </span>
+            <input type="checkbox" id="ultraGlass">
+            <span class="switch__track"><span class="switch__knob"></span></span>
+          </label>
+          <label class="switch">
+            <span class="switch__text">
+              <b>背景光晕动画</b>
+              <small>关闭可再省一点电。</small>
+            </span>
+            <input type="checkbox" id="auroraAnim" checked>
+            <span class="switch__track"><span class="switch__knob"></span></span>
+          </label>
         </div>
 
         <div class="card">
-          <div class="card__label">关于</div>
-          <div class="kv"><span>版本</span><span id="appVersion">1.0</span></div>
+          <div class="card__label">数据</div>
+          <div class="kv"><span>功能数量</span><span id="statCount">—</span></div>
+          <div class="kv"><span>我的收藏</span><span id="statFav">—</span></div>
           <div class="kv"><span>运行方式</span><span id="appMode">—</span></div>
-          <div class="kv"><span>缓存状态</span><span id="swStatus">—</span></div>
+          <div class="kv"><span>离线缓存</span><span id="swStatus">—</span></div>
         </div>
 
-        <button class="btn" id="btnRefresh">重新加载</button>
-        <p class="footnote">加到主屏幕后打开，就是全屏无地址栏的独立 App。</p>
+        <button class="btn btn--ghost" id="btnClearFav">清空收藏</button>
+        <p class="footnote">
+          全部功能都在你 iPad 本地算，不联网、不上传。收藏和倒数日存在本机浏览器里。
+        </p>
 
       </div>
     </section>
 
   </main>
 
-  <!-- 底部标签栏 -->
-  <nav class="tabbar">
-    <button class="tab is-active" data-target="screen-home">
+  <!-- ============ 底部：标签栏 ============ -->
+  <nav class="tabbar glass">
+    <button class="tab is-active" data-target="screen-home" data-title="功能">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/>
-      </svg>
-      <span>首页</span>
-    </button>
-    <button class="tab" data-target="screen-tools">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-        <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        <rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/>
+        <rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/>
       </svg>
       <span>功能</span>
     </button>
-    <button class="tab" data-target="screen-settings">
+    <button class="tab" data-target="screen-fav" data-title="收藏">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H11a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V11a1.7 1.7 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/>
+        <path d="M12 3.6l2.7 5.7 6.2.8-4.5 4.3 1.1 6.1-5.5-2.9-5.5 2.9 1.1-6.1L3.1 10.1l6.2-.8z"/>
+      </svg>
+      <span>收藏</span>
+    </button>
+    <button class="tab" data-target="screen-settings" data-title="设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8M18.6 18.6l-1.8-1.8M7.2 7.2 5.4 5.4"/>
       </svg>
       <span>设置</span>
     </button>
@@ -117,6 +129,35 @@
 
 </div>
 
+<!-- ============ 功能详情面板 ============ -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet__scrim" id="sheetScrim"></div>
+  <div class="sheet__panel glass-strong" id="sheetPanel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet__grabber" id="sheetGrabber"></div>
+
+    <div class="sheet__head">
+      <div class="sheet__icon" id="sheetIcon"></div>
+      <div class="sheet__titles">
+        <h2 id="sheetTitle">—</h2>
+        <p id="sheetDesc"></p>
+      </div>
+      <button class="iconbtn" id="sheetFav" type="button" aria-label="收藏">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3.6l2.7 5.7 6.2.8-4.5 4.3 1.1 6.1-5.5-2.9-5.5 2.9 1.1-6.1L3.1 10.1l6.2-.8z"/>
+        </svg>
+      </button>
+      <button class="iconbtn" id="sheetClose" type="button" aria-label="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+          <path d="M7 7l10 10M17 7 7 17"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="sheet__body" id="sheetBody"></div>
+  </div>
+</div>
+
+<script src="features.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
