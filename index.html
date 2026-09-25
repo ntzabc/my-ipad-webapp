@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MyApp">
+<meta name="format-detection" content="telephone=no">
+<title>MyApp</title>
+<meta name="description" content="自用 iPad 应用">
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#F97316" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- 顶部标题栏 -->
+  <header class="topbar">
+    <h1 class="topbar__title" id="topbarTitle">首页</h1>
+  </header>
+
+  <!-- 页面容器 -->
+  <main class="screens" id="screens">
+
+    <section class="screen is-active" id="screen-home">
+      <div class="stack">
+
+        <div class="card">
+          <div class="card__label">当前时间</div>
+          <div class="clock" id="clock">--:--:--</div>
+          <div class="card__hint">秒数在跳 = 页面脚本正常运行</div>
+        </div>
+
+        <div class="card">
+          <div class="card__label">状态</div>
+          <div class="row">
+            <span class="dot"></span>
+            <span id="engineStatus">骨架已就绪，等待应用内容</span>
+          </div>
+          <div class="card__hint" id="displayMode">运行模式检测中…</div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="screen" id="screen-tools">
+      <div class="empty">
+        <svg class="empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+        <div class="empty__title">功能还没填</div>
+        <div class="empty__desc">等你说完要做什么，我把具体界面写到这里</div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-settings">
+      <div class="stack">
+
+        <div class="card">
+          <div class="card__label">外观</div>
+          <div class="segmented" id="themeSeg">
+            <button class="segmented__item is-active" data-theme="auto">跟随系统</button>
+            <button class="segmented__item" data-theme="light">浅色</button>
+            <button class="segmented__item" data-theme="dark">深色</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__label">关于</div>
+          <div class="kv"><span>版本</span><span id="appVersion">1.0</span></div>
+          <div class="kv"><span>运行方式</span><span id="appMode">—</span></div>
+          <div class="kv"><span>缓存状态</span><span id="swStatus">—</span></div>
+        </div>
+
+        <button class="btn" id="btnRefresh">重新加载</button>
+        <p class="footnote">加到主屏幕后打开，就是全屏无地址栏的独立 App。</p>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 底部标签栏 -->
+  <nav class="tabbar">
+    <button class="tab is-active" data-target="screen-home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/>
+      </svg>
+      <span>首页</span>
+    </button>
+    <button class="tab" data-target="screen-tools">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+        <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+      </svg>
+      <span>功能</span>
+    </button>
+    <button class="tab" data-target="screen-settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H11a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V11a1.7 1.7 0 0 0 1.5 1H23a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/>
+      </svg>
+      <span>设置</span>
+    </button>
+  </nav>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
