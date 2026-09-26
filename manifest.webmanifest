@@ -1,32 +1,17 @@
 {
-  "name": "MyApp",
-  "short_name": "MyApp",
-  "description": "自用 iPad 工具箱：房贷、单位换算、日期、文本、密码、随机决策",
+  "name": "AI Lab",
+  "short_name": "AI Lab",
+  "description": "跑在 iPad 本地的 AI 游乐场：手写神经网络、神经进化、对战 AI",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#050B1A",
-  "theme_color": "#050B1A",
+  "background_color": "#04091A",
+  "theme_color": "#04091A",
   "lang": "zh-CN",
   "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

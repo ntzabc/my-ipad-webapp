@@ -1,10 +1,12 @@
 /* 极简离线缓存：让加到主屏幕的 App 断网也能打开 */
 
-const CACHE = 'myapp-v2';
+const CACHE = 'ailab-v1';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
+  './ai.js',
+  './particles.js',
   './features.js',
   './app.js',
   './manifest.webmanifest',
@@ -31,7 +33,7 @@ self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  // 页面本身走"网络优先"，保证改完能立刻看到新版本
+  // 页面走"网络优先"，保证改完刷新就能看到新版本
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -45,7 +47,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // 其他静态资源走"缓存优先"
+  // 静态资源走"缓存优先"
   event.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {
       const copy = res.clone();

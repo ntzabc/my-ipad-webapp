@@ -6,42 +6,44 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="MyApp">
+<meta name="apple-mobile-web-app-title" content="AI Lab">
 <meta name="format-detection" content="telephone=no">
 <meta name="color-scheme" content="dark">
-<title>MyApp</title>
-<meta name="description" content="自用 iPad 工具箱">
+<title>AI Lab</title>
+<meta name="description" content="跑在自己 iPad 上的 AI 游乐场：手写神经网络、进化模拟、对战 AI">
 
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#050B1A">
+<meta name="theme-color" content="#04091A">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="glass-1">
 
-<!-- 背景光斑：玻璃要"有东西可折射"才像真的 -->
-<div class="aurora" aria-hidden="true">
-  <span class="aurora__blob aurora__blob--1"></span>
-  <span class="aurora__blob aurora__blob--2"></span>
-  <span class="aurora__blob aurora__blob--3"></span>
-  <span class="aurora__grain"></span>
+<!-- ============ 背景层：光晕 + 粒子 ============ -->
+<div class="bg" aria-hidden="true">
+  <div class="aurora">
+    <span class="aurora__blob aurora__blob--1"></span>
+    <span class="aurora__blob aurora__blob--2"></span>
+    <span class="aurora__blob aurora__blob--3"></span>
+  </div>
+  <canvas id="particles"></canvas>
+  <div class="bg__vignette"></div>
 </div>
 
 <div class="app">
 
-  <!-- ============ 顶部：标题 + 功能搜索 ============ -->
+  <!-- ============ 顶栏 + 搜索 ============ -->
   <header class="topbar glass" id="topbar">
     <div class="topbar__row">
-      <h1 class="topbar__title" id="topbarTitle">功能</h1>
+      <h1 class="topbar__title" id="topbarTitle">AI 玩法</h1>
       <span class="topbar__count" id="topbarCount"></span>
     </div>
-
     <label class="searchbar" id="searchWrap">
       <svg class="searchbar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <circle cx="11" cy="11" r="6.5"/><path d="M16.2 16.2 20.5 20.5"/>
       </svg>
-      <input id="search" type="search" placeholder="搜索功能，如「房贷」「大写」「时区」"
+      <input id="search" type="search" placeholder="搜索玩法，如「神经网络」「棋」「猜拳」「寻路」"
              autocomplete="off" autocorrect="off" autocapitalize="off" enterkeyhint="search" spellcheck="false">
       <button class="searchbar__clear" id="searchClear" type="button" aria-label="清空" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -51,7 +53,7 @@
     </label>
   </header>
 
-  <!-- ============ 中间：功能板块 ============ -->
+  <!-- ============ 主体 ============ -->
   <main class="screens" id="screens">
 
     <section class="screen is-active" id="screen-home">
@@ -65,37 +67,67 @@
     <section class="screen" id="screen-settings">
       <div class="stack">
 
-        <div class="card">
-          <div class="card__label">玻璃效果</div>
-          <label class="switch">
-            <span class="switch__text">
-              <b>极致玻璃</b>
-              <small>给每张卡片都开真实背景模糊。好看，但滚动时更吃 GPU——卡就关掉。</small>
-            </span>
-            <input type="checkbox" id="ultraGlass">
-            <span class="switch__track"><span class="switch__knob"></span></span>
-          </label>
-          <label class="switch">
-            <span class="switch__text">
-              <b>背景光晕动画</b>
-              <small>关闭可再省一点电。</small>
-            </span>
-            <input type="checkbox" id="auroraAnim" checked>
-            <span class="switch__track"><span class="switch__knob"></span></span>
-          </label>
+        <!-- 玻璃质感：这里刻意不给卡片加背景模糊，否则会盖住粒子的真实效果 -->
+        <div class="card card--plain">
+          <div class="card__label">玻璃质感</div>
+          <p class="note note--lead">
+            背景里几百个粒子就是玻璃的"燃料"。模糊半径越大，粒子被糊得越散 ——
+            下面两块是同一位置的实物对照，差别一眼能看出来。
+          </p>
+
+          <div class="segmented" id="glassSeg">
+            <button type="button" data-level="1">流畅</button>
+            <button type="button" data-level="2">标准</button>
+            <button type="button" data-level="3">极致</button>
+          </div>
+
+          <div class="glassdemo">
+            <div class="glassdemo__col">
+              <div class="glassdemo__box glassdemo__box--plain"></div>
+              <span class="glassdemo__cap">流畅</span>
+            </div>
+            <div class="glassdemo__col">
+              <div class="glassdemo__box glassdemo__box--ultra"></div>
+              <span class="glassdemo__cap">极致</span>
+            </div>
+          </div>
+
+          <p class="note">卡顿就降一档。极致档会让 iPad 每帧多做一次背景采样，是会费电的。</p>
         </div>
 
+        <!-- 粒子 -->
         <div class="card">
-          <div class="card__label">数据</div>
-          <div class="kv"><span>功能数量</span><span id="statCount">—</span></div>
+          <div class="card__label">背景粒子</div>
+          <label class="switch">
+            <span class="switch__text"><b>启用粒子</b><small>关掉可省电，但玻璃就没什么可折射的了</small></span>
+            <input type="checkbox" id="swParts">
+            <span class="switch__track"><span class="switch__knob"></span></span>
+          </label>
+          <label class="switch">
+            <span class="switch__text"><b>光晕流动</b><small>背景那三团蓝色光晕要不要缓慢漂移</small></span>
+            <input type="checkbox" id="swAnim">
+            <span class="switch__track"><span class="switch__knob"></span></span>
+          </label>
+          <div class="kv"><span>当前粒子数</span><span id="pcount">—</span></div>
+          <div class="kv"><span>实测帧率</span><span id="pfps">—</span></div>
+          <p class="note">粒子数会自己调节：连续掉帧就自动减量，恢复了再加回来。</p>
+        </div>
+
+        <!-- 关于 -->
+        <div class="card">
+          <div class="card__label">关于</div>
+          <div class="kv"><span>玩法数量</span><span id="statCount">—</span></div>
           <div class="kv"><span>我的收藏</span><span id="statFav">—</span></div>
           <div class="kv"><span>运行方式</span><span id="appMode">—</span></div>
           <div class="kv"><span>离线缓存</span><span id="swStatus">—</span></div>
+          <div class="kv"><span>计算位置</span><span>全部在这台 iPad 上</span></div>
         </div>
 
         <button class="btn btn--ghost" id="btnClearFav">清空收藏</button>
+
         <p class="footnote">
-          全部功能都在你 iPad 本地算，不联网、不上传。收藏和倒数日存在本机浏览器里。
+          神经网络、进化算法、博弈搜索全部是从零手写的 JavaScript，不联网、不上传、不调用任何外部服务。<br>
+          你手里的 iPad 就是全部算力来源。
         </p>
 
       </div>
@@ -103,22 +135,22 @@
 
   </main>
 
-  <!-- ============ 底部：标签栏 ============ -->
+  <!-- ============ 底栏 ============ -->
   <nav class="tabbar glass">
-    <button class="tab is-active" data-target="screen-home" data-title="功能">
+    <button class="tab is-active" data-target="screen-home">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/>
-        <rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/>
+        <path d="M12 3.2l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>
+        <path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>
       </svg>
-      <span>功能</span>
+      <span>玩法</span>
     </button>
-    <button class="tab" data-target="screen-fav" data-title="收藏">
+    <button class="tab" data-target="screen-fav">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 3.6l2.7 5.7 6.2.8-4.5 4.3 1.1 6.1-5.5-2.9-5.5 2.9 1.1-6.1L3.1 10.1l6.2-.8z"/>
       </svg>
       <span>收藏</span>
     </button>
-    <button class="tab" data-target="screen-settings" data-title="设置">
+    <button class="tab" data-target="screen-settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3.2"/>
         <path d="M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8M18.6 18.6l-1.8-1.8M7.2 7.2 5.4 5.4"/>
@@ -129,7 +161,7 @@
 
 </div>
 
-<!-- ============ 功能详情面板 ============ -->
+<!-- ============ 玩法面板 ============ -->
 <div class="sheet" id="sheet" hidden>
   <div class="sheet__scrim" id="sheetScrim"></div>
   <div class="sheet__panel glass-strong" id="sheetPanel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -157,6 +189,8 @@
   </div>
 </div>
 
+<script src="ai.js"></script>
+<script src="particles.js"></script>
 <script src="features.js"></script>
 <script src="app.js"></script>
 </body>
