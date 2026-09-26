@@ -124,61 +124,176 @@ G('神经网络收敛');
 })();
 
 /* ============================================================
-   3. 神经进化 —— 进化确实在改善
+   3. 神经进化 —— 进化有效性 + 本轮修复的四个问题
    ============================================================ */
-G('神经进化');
+G('神经进化 · 基础');
+
+(function basics() {
+  const w = new AI.NeuroWorld({ seed: 2024, width: 420, height: 300, popSize: 30, genLength: 300, foodCount: 12 });
+  eq(w.pop.length, 30, '种群规模正确');
+  eq(w.food.length, 12, '食物数量正确（构造函数会布好食物）');
+  eq(w.phase, 'setup', '初始处于布置阶段');
+  ok(w.food.every(f => !w.fitsWall(f.x, f.y, 2)), '初始食物没有生成在障碍里');
+})();
+
+G('神经进化 · 布置阶段');
+
+(function phaseGating() {
+  const w = new AI.NeuroWorld({ seed: 5, width: 420, height: 300, popSize: 20, genLength: 120 });
+  const before = JSON.stringify(w.pop.map(a => [a.x, a.y]));
+  for (let i = 0; i < 300; i++) w.tick();
+  eq(w.tickCount, 0, '布置阶段 tick 完全不推进');
+  eq(JSON.stringify(w.pop.map(a => [a.x, a.y])), before, '布置阶段虫子不会动');
+  eq(w.phase, 'setup', '阶段保持 setup');
+
+  w.setPhase('running');
+  for (let i = 0; i < 10; i++) w.tick();
+  eq(w.tickCount, 10, '开始后每帧推进一次');
+  eq(w.phase, 'running', '阶段切到 running');
+})();
+
+G('神经进化 · 手绘障碍');
+
+(function strokes() {
+  const w = new AI.NeuroWorld({ seed: 9, width: 400, height: 300 });
+  w.clearStrokes();
+  eq(w.strokes.length, 0, '清空后没有笔画');
+
+  w.beginStroke(100, 100);
+  w.extendStroke(150, 120);
+  w.extendStroke(200, 100);
+  w.endStroke();
+  eq(w.strokes.length, 1, '一次落笔形成一条笔画');
+  eq(w.strokes[0].pts.length, 3, '笔画记录了 3 个点');
+  ok(w.strokeLength() > 90, '笔画长度统计正常（' + Math.round(w.strokeLength()) + '）');
+
+  ok(w.hitWall(100, 100), '笔画起点判定为障碍');
+  ok(w.hitWall(150, 120), '笔画拐点判定为障碍');
+  ok(!w.hitWall(100, 220), '远离笔画的位置不是障碍');
+
+  // 弯曲笔画：画一段弧
+  w.beginStroke(60, 220);
+  for (let a = 0; a <= Math.PI; a += 0.15) {
+    w.extendStroke(60 + Math.cos(a) * 45, 220 + Math.sin(a) * 45);
+  }
+  w.endStroke();
+  ok(w.strokes[1].pts.length > 12, '弯曲笔画的每个点都被记录（' + w.strokes[1].pts.length + ' 个点）');
+  ok(w.hitWall(60 + 45, 220 + 45 * 0.01), '弧线上判定为障碍');
+
+  w.undoStroke();
+  eq(w.strokes.length, 1, '撤销会移除最后一条笔画');
+})();
+
+(function noCap() {
+  const w = new AI.NeuroWorld({ seed: 3, width: 400, height: 300 });
+  w.clearStrokes();
+  for (let i = 0; i < 60; i++) {
+    w.beginStroke(10, 10 + i * 4);
+    w.extendStroke(200, 10 + i * 4);
+    w.endStroke();
+  }
+  ok(w.strokes.length >= 60, '笔画数量不设上限（旧版本超过 14 块就开始删最早的）');
+  for (let i = 0; i < 40; i++) w.tick();
+  ok(w.strokes.length >= 60, '推进过程中障碍不会被自动清除');
+})();
+
+G('神经进化 · 食物不再消失');
+
+(function foodFix() {
+  const w = new AI.NeuroWorld({ seed: 11, width: 420, height: 300, foodCount: 8, popSize: 10, genLength: 100000 });
+  const before = w.food.length;
+  for (let i = 0; i < 30; i++) w.addFood(60 + i * 8, 200);
+  eq(w.food.length, before + 30, '用户投放 30 个食物后一个都没丢（旧版本会被挤掉）');
+  ok(w.food.filter(f => f.mine).length === 30, '用户投放的食物带标记');
+
+  // 跑一段，确认食物总数不减少
+  w.setPhase('running');
+  for (let i = 0; i < 200; i++) w.tick();
+  eq(w.food.length, before + 30, '推进 200 帧后食物总数不变（吃掉会换位置而不是凭空消失）');
+})();
+
+G('神经进化 · 预设与存档');
+
+(function presets() {
+  const keys = Object.keys(AI.PRESETS);
+  ok(keys.length >= 5, '至少内置 5 套预设（' + keys.join(' / ') + '）');
+
+  keys.forEach(k => {
+    const w = new AI.NeuroWorld({ width: 420, height: 300, preset: k });
+    eq(w.presetKey, k, '预设「' + AI.PRESETS[k].name + '」生效');
+    ok(!w.fitsWall(w.spawn[0] * 420, w.spawn[1] * 300, 8),
+       '预设「' + AI.PRESETS[k].name + '」的出生点不在障碍里');
+    ok(w.food.every(f => !w.fitsWall(f.x, f.y, 2)),
+       '预设「' + AI.PRESETS[k].name + '」的食物没被生成在障碍里');
+  });
+
+  // 非空预设必须真的画了障碍
+  ['canyon', 'maze', 'funnel', 'columns'].forEach(k => {
+    const w = new AI.NeuroWorld({ width: 420, height: 300, preset: k });
+    ok(w.strokes.length > 0 && w.strokeLength() > 50,
+       '预设「' + AI.PRESETS[k].name + '」铺了实际存在的障碍');
+  });
+})();
+
+(function difficulty() {
+  const w = new AI.NeuroWorld({ width: 420, height: 300 });
+  w.setDifficulty('hard');
+  eq(w.popSize, AI.DIFFICULTY.hard.popSize, '严苛档种群规模生效');
+  eq(w.genLength, AI.DIFFICULTY.hard.genLength, '严苛档世代长度生效');
+  w.setDifficulty('easy');
+  ok(w.genLength < AI.DIFFICULTY.hard.genLength, '轻松档一代更短');
+})();
+
+(function layoutArchive() {
+  const a = new AI.NeuroWorld({ width: 420, height: 300, preset: 'maze' });
+  a.beginStroke(30, 260);
+  a.extendStroke(120, 260);
+  a.endStroke();
+  const dump = JSON.parse(JSON.stringify(a.exportLayout()));
+  ok(dump.strokes.length === a.strokes.length, '存档包含全部笔画');
+  ok(dump.params && dump.params.popSize > 0, '存档包含参数');
+
+  const b = new AI.NeuroWorld({ width: 420, height: 300 });
+  ok(b.importLayout(dump), '存档能导入');
+  eq(b.strokes.length, a.strokes.length, '导入后笔画数量一致');
+  eq(b.presetKey, 'custom', '导入后标记为自定义布局');
+  eq(b.popSize, a.popSize, '导入后参数一并恢复');
+  ok(b.importLayout(null) === false, '空存档被安全拒绝');
+})();
+
+G('神经进化 · 进化有效性');
 
 (function evolution() {
-  const w1 = new AI.NeuroWorld({ seed: 2024, popSize: 30, genLength: 400, foodCount: 12 });
-  const w2 = new AI.NeuroWorld({ seed: 2024, popSize: 30, genLength: 400, foodCount: 12 });
+  const cfg = { seed: 2024, width: 460, height: 320, popSize: 34, genLength: 420, foodCount: 14, preset: 'empty' };
+  const w1 = new AI.NeuroWorld(cfg);
+  const w2 = new AI.NeuroWorld(cfg);
 
-  eq(w1.pop.length, 30, '种群规模正确');
-  eq(w1.food.length, 12, '食物数量正确');
+  w1.setPhase('running');
+  for (let i = 0; i < 420 * 30; i++) w1.tick();
 
-  // 跑一代
-  const gen0 = w1.generation;
-  for (let i = 0; i < 400; i++) w1.tick();
-  eq(w1.generation, gen0 + 1, '跑满一代后世代 +1');
-
-  // 跑 30 代
-  for (let i = 0; i < 400 * 29; i++) w1.tick();
   ok(w1.history.length >= 25, '记录了进化曲线（' + w1.history.length + ' 代）');
-
   const early = w1.history.slice(0, 8).map(h => h.best);
   const late = w1.history.slice(-8).map(h => h.best);
   const earlyMax = Math.max.apply(null, early);
   const lateMax = Math.max.apply(null, late);
   ok(lateMax >= earlyMax, '后期最好成绩不低于前期（' + earlyMax + ' → ' + lateMax + '）');
-  ok(lateMax >= 3, '进化出的智能体真的学会觅食（最好 ' + lateMax + ' 个）');
-  const earlyAvg = early.reduce((a,b)=>a+b,0) / early.length;
-  const lateAvg = late.reduce((a,b)=>a+b,0) / late.length;
-  ok(lateAvg > earlyAvg, '种群平均觅食能力提升（' + earlyAvg.toFixed(1) + ' → ' + lateAvg.toFixed(1) + '）');
+  ok(lateMax >= 3, '进化出的虫子真的学会觅食（最好 ' + lateMax + ' 个）');
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  ok(avg(late) > avg(early), '种群平均觅食能力提升（' + avg(early).toFixed(1) + ' → ' + avg(late).toFixed(1) + '）');
 
-  // 确定性
-  for (let i = 0; i < 400 * 5; i++) w2.tick();
-  ok(JSON.stringify(w2.history) ===
-     JSON.stringify(w1.history.slice(0, w2.history.length)),
+  w2.setPhase('running');
+  for (let i = 0; i < 420 * 5; i++) w2.tick();
+  eq(JSON.stringify(w2.history), JSON.stringify(w1.history.slice(0, w2.history.length)),
      '相同种子 → 进化过程完全可复现');
 })();
 
 (function mutation() {
-  const w = new AI.NeuroWorld({ seed: 3, popSize: 10, genLength: 50 });
+  const w = new AI.NeuroWorld({ seed: 3, width: 420, height: 300, popSize: 10, genLength: 50 });
   const before = w.pop[0].brain.weightSum();
   const clone = w.pop[0].brain.clone();
   eq(clone.weightSum(), before, '复制体权重与原网络一致');
   w._mutate(clone);
   ok(clone.weightSum() !== before, '变异确实改动了网络权重');
-})();
-
-(function interactivity() {
-  const w = new AI.NeuroWorld({ seed: 11, popSize: 8, genLength: 100, foodCount: 5 });
-  const n0 = w.food.length;
-  w.addFood(50, 50);
-  eq(w.food.length, n0 + 1, '点击可以加食物');
-  w.addWall(100, 100);
-  eq(w.walls.length, 1, '可以加障碍');
-  w.clearWalls();
-  eq(w.walls.length, 0, '可以清空障碍');
 })();
 
 /* ============================================================
@@ -262,91 +377,7 @@ G('AI 读心猜拳');
 })();
 
 /* ============================================================
-   5. 反转棋
-   ============================================================ */
-G('反转棋');
-
-(function setup() {
-  const b = AI.newBoard();
-  const c = AI.countDiscs(b);
-  eq(c.black, 2, '开局黑 2 子');
-  eq(c.white, 2, '开局白 2 子');
-  eq(AI.legalMoves(b, 1).length, 4, '黑棋开局有 4 个合法落点');
-  eq(AI.legalMoves(b, -1).length, 4, '白棋开局有 4 个合法落点');
-})();
-
-(function flipping() {
-  const b = AI.newBoard();
-  // 黑棋下 d3（索引 19 = x3,y2）翻 d4
-  const step = AI.applyMove(b, 19, 1);
-  ok(step !== null, '合法落点可以下');
-  eq(step.flipped, 1, '翻掉 1 颗子');
-  eq(step.board[19], 1, '落点变成黑子');
-  eq(step.board[27], 1, '被夹住的子翻成黑子');
-  eq(AI.flipsFor(b, 18, 1), null, '非法落点返回 null');
-
-  const c = AI.countDiscs(step.board);
-  eq(c.black, 4, '下完后黑 4 子');
-  eq(c.white, 1, '下完后白 1 子');
-})();
-
-(function corner() {
-  // 构造一个局面：角 (0,0) 是黑棋的合法落点
-  const b = new Int8Array(64);
-  b[AI.idx(2, 2)] = 1;    // 黑
-  b[AI.idx(1, 1)] = -1;   // 白
-  b[AI.idx(2, 0)] = 1;    // 黑
-  b[AI.idx(1, 0)] = -1;   // 白
-
-  const fl = AI.flipsFor(b, AI.idx(0, 0), 1);
-  ok(fl !== null && fl.length === 2, '角上是合法落点，能翻 2 子');
-  ok(AI.legalMoves(b, 1).length > 1, '同时还有其他合法落点（可比较）');
-
-  const mv = AI.bestMove(b, 1, 3, 1);
-  eq(mv, AI.idx(0, 0), 'AI 会选择吃角（位置权重最高的那手）');
-})();
-
-(function search() {
-  const b = AI.newBoard();
-  const mv = AI.bestMove(b, 1, 4, 2);
-  ok(AI.legalMoves(b, 1).indexOf(mv) >= 0, 'AI 返回的是合法落点');
-
-  const e1 = AI.easyMove(b, 1, 1);
-  ok(e1 === null || AI.legalMoves(b, 1).indexOf(e1) >= 0, '简单档也返回合法落点');
-
-  // 无子可下时返回 null
-  const empty = new Int8Array(64);
-  empty[0] = 1;
-  eq(AI.bestMove(empty, -1, 2, 1), null, '白棋无处可下时返回 null');
-
-  // 全盘下完的终局评估不崩
-  const full = new Int8Array(64).fill(1);
-  ok(isFinite(AI.evaluate(full, 1)), '终局评估返回有限数值');
-})();
-
-(function playout() {
-  // 让 AI 自战一整局，确保不崩、不出现非法落点
-  let b = AI.newBoard();
-  let player = 1;
-  let plies = 0, passes = 0;
-  const seed = AI.makeRng(4);
-  while (plies < 70 && passes < 2) {
-    const mv = AI.bestMove(b, player, 3, Math.floor(seed() * 1e6));
-    if (mv === null) { passes++; player = -player; continue; }
-    passes = 0;
-    const step = AI.applyMove(b, mv, player);
-    if (!step) { ok(false, '自战出现非法落点'); return; }
-    b = step.board;
-    player = -player;
-    plies++;
-  }
-  ok(plies > 20, 'AI 自战能走满一局（' + plies + ' 手）');
-  const c = AI.countDiscs(b);
-  eq(c.black + c.white + b.filter(x => x === 0).length, 64, '棋盘状态自洽');
-})();
-
-/* ============================================================
-   6. 寻路
+   5. 寻路
    ============================================================ */
 G('寻路算法');
 

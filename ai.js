@@ -304,75 +304,421 @@
 
   /* ============================================================
      3. 神经进化 —— 神经网络大脑 + 遗传算法
+     ------------------------------------------------------------
+     障碍用"笔画"表示：一串折线点。可以画出任意弯曲的线，
+     长度和数量都不设上限（旧版本用方块、还超过 14 块就删最早的，
+     两个问题都改掉了）。
+     碰撞用粗网格加速，查询是 O(1)，几百个智能体也跑得动。
      ============================================================ */
   const SENSE = 6, HIDDEN = 10, ACT = 2;
+  const CELL = 14;                       // 碰撞网格单元尺寸
+
+  /* 点到线段距离 */
+  function distSeg(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    const qx = x1 + t * dx, qy = y1 + t * dy;
+    return Math.hypot(px - qx, py - qy);
+  }
+
+  /* 预设：布局 + 参数一起定义，换布局就是换一局 */
+  const PRESETS = {
+    empty: {
+      name: '空旷平原',
+      desc: '没有障碍，先看它们会不会学',
+      params: { popSize: 44, genLength: 760, foodCount: 16, mutation: 0.10 },
+      spawn: [0.5, 0.5],
+      build() { return []; }
+    },
+    canyon: {
+      name: '峡谷',
+      desc: '一道横墙只留中间缺口，必须学会找路口',
+      params: { popSize: 44, genLength: 900, foodCount: 16, mutation: 0.10 },
+      spawn: [0.5, 0.22],
+      build(W, H) {
+        const y = H * 0.55, gap = H * 0.30, cx = W * 0.5;
+        return [
+          { w: 7, pts: [[0, y], [cx - gap / 2, y]] },
+          { w: 7, pts: [[cx + gap / 2, y], [W, y]] }
+        ];
+      }
+    },
+    maze: {
+      name: '迷宫走廊',
+      desc: '三道错位竖墙，考验绕路能力',
+      params: { popSize: 52, genLength: 1000, foodCount: 18, mutation: 0.12 },
+      spawn: [0.10, 0.5],
+      build(W, H) {
+        const out = [];
+        for (let i = 1; i <= 3; i++) {
+          const x = W * i / 4;
+          const cy = H * (i % 2 === 0 ? 0.72 : 0.28);
+          const gap = H * 0.30;
+          out.push({ w: 7, pts: [[x, 0], [x, Math.max(0, cy - gap / 2)]] });
+          out.push({ w: 7, pts: [[x, Math.min(H, cy + gap / 2)], [x, H]] });
+        }
+        return out;
+      }
+    },
+    funnel: {
+      name: '漏斗',
+      desc: '两边收窄到一个小口，撞墙代价很高',
+      params: { popSize: 52, genLength: 900, foodCount: 18, mutation: 0.12 },
+      spawn: [0.5, 0.14],
+      build(W, H) {
+        return [
+          { w: 7, pts: [[0, 0], [W * 0.42, H * 0.44]] },
+          { w: 7, pts: [[W, 0], [W * 0.58, H * 0.44]] },
+          { w: 7, pts: [[W * 0.42, H * 0.56], [0, H]] },
+          { w: 7, pts: [[W * 0.58, H * 0.56], [W, H]] }
+        ];
+      }
+    },
+    columns: {
+      name: '立柱阵',
+      desc: '一片短墙柱子，绕行路线很多',
+      params: { popSize: 48, genLength: 860, foodCount: 16, mutation: 0.11 },
+      spawn: [0.5, 0.5],
+      build(W, H) {
+        const out = [];
+        for (let i = 1; i <= 4; i++) {
+          for (let j = 1; j <= 2; j++) {
+            const x = W * i / 5, y = H * j / 3;
+            out.push({ w: 8, pts: [[x, y - H * 0.12], [x, y + H * 0.12]] });
+          }
+        }
+        return out;
+      }
+    }
+  };
+
+  const DIFFICULTY = {
+    easy:   { name: '轻松', genLength: 620,  foodCount: 20, popSize: 44, mutation: 0.16 },
+    normal: { name: '标准', genLength: 820,  foodCount: 16, popSize: 48, mutation: 0.11 },
+    hard:   { name: '严苛', genLength: 1100, foodCount: 12, popSize: 56, mutation: 0.08 }
+  };
 
   class NeuroWorld {
     constructor(opts) {
       opts = opts || {};
-      this.W = opts.width || 480;
-      this.H = opts.height || 360;
-      this.popSize = opts.popSize || 44;
-      this.genLength = opts.genLength || 760;
-      this.foodCount = opts.foodCount || 14;
+      this.W = opts.width || 520;
+      this.H = opts.height || 340;
       this.rng = makeRng(opts.seed || 7);
-      this.walls = [];
-      this.reset();
-    }
 
-    reset() {
+      this.strokes = [];          // [{ w: 线宽, pts: [[x,y], ...] }]
+      this._grid = null;
+      this.penWidth = opts.penWidth || 7;
+
+      this.presetKey = opts.preset || 'empty';
+      this.difficulty = opts.difficulty || 'normal';
+
+      const base = DIFFICULTY[this.difficulty] || DIFFICULTY.normal;
+      const pre = PRESETS[this.presetKey] || PRESETS.empty;
+      const p = pre.params || {};
+      this.popSize    = opts.popSize    || p.popSize    || base.popSize;
+      this.genLength  = opts.genLength  || p.genLength  || base.genLength;
+      this.foodCount  = opts.foodCount  || p.foodCount  || base.foodCount;
+      this.mutation   = opts.mutation   != null ? opts.mutation : (p.mutation || base.mutation);
+
+      this.spawn = (pre.spawn || [0.5, 0.5]).slice();
+      this.strokes = this._buildPreset(this.presetKey);
+
+      this.phase = 'setup';       // setup（布置障碍） / running（进化中）
+      this.pop = [];
+      this.food = [];
       this.generation = 1;
       this.tickCount = 0;
+      this.history = [];
+      this.bestEver = 0;
+      this.bestFood = 0;
+      this.avgFood = 0;
+      this.eatenTotal = 0;
+      this._preparePopulation();
+      this._placeFood();
+    }
+
+    /* ---------- 布局 ---------- */
+    _buildPreset(key) {
+      const pre = PRESETS[key] || PRESETS.empty;
+      let raw = [];
+      try { raw = pre.build(this.W, this.H) || []; } catch (_) { raw = []; }
+      this.spawn = (pre.spawn || [0.5, 0.5]).slice();
+      return raw.map(s => ({ w: s.w || 7, pts: s.pts.map(pt => [pt[0], pt[1]]) }));
+    }
+
+    applyPreset(key) {
+      key = PRESETS[key] ? key : 'empty';
+      this.presetKey = key;
+      this.strokes = this._buildPreset(key);
+      const p = (PRESETS[key].params) || {};
+      if (p.popSize) this.popSize = p.popSize;
+      if (p.genLength) this.genLength = p.genLength;
+      if (p.foodCount) this.foodCount = p.foodCount;
+      if (p.mutation != null) this.mutation = p.mutation;
+      this.phase = 'setup';
+      this._preparePopulation();
+      this._placeFood();
+    }
+
+    setDifficulty(d) {
+      if (!DIFFICULTY[d]) return;
+      this.difficulty = d;
+      const base = DIFFICULTY[d];
+      this.popSize = base.popSize;
+      this.genLength = base.genLength;
+      this.foodCount = base.foodCount;
+      this.mutation = base.mutation;
+      this._preparePopulation();
+      this._placeFood();
+    }
+
+    /* ---------- 笔画障碍 ---------- */
+    beginStroke(x, y) {
+      this.strokes.push({ w: this.penWidth, pts: [[x, y]] });
+      this._grid = null;
+    }
+    extendStroke(x, y) {
+      const s = this.strokes[this.strokes.length - 1];
+      if (!s) return;
+      const last = s.pts[s.pts.length - 1];
+      if (Math.hypot(x - last[0], y - last[1]) < 3.5) return;   // 抽稀，别存太密的点
+      s.pts.push([x, y]);
+      this._grid = null;
+    }
+    endStroke() { this._grid = null; }
+    clearStrokes() { this.strokes = []; this._grid = null; }
+    undoStroke() { this.strokes.pop(); this._grid = null; }
+
+    /* 笔画总长度，用来做统计展示 */
+    strokeLength() {
+      let total = 0;
+      for (const s of this.strokes) {
+        for (let i = 1; i < s.pts.length; i++) {
+          total += Math.hypot(s.pts[i][0] - s.pts[i - 1][0], s.pts[i][1] - s.pts[i - 1][1]);
+        }
+      }
+      return total;
+    }
+
+    /* 把笔画栅格化成粗网格，碰撞查询变成 O(1) */
+    _buildGrid() {
+      const gw = Math.max(1, Math.ceil(this.W / CELL));
+      const gh = Math.max(1, Math.ceil(this.H / CELL));
+      const g = new Uint8Array(gw * gh);
+      for (const s of this.strokes) {
+        const half = (s.w || 7) / 2;
+        const reach = half + CELL * 0.71;
+        for (let i = 1; i < s.pts.length; i++) {
+          const x1 = s.pts[i - 1][0], y1 = s.pts[i - 1][1];
+          const x2 = s.pts[i][0], y2 = s.pts[i][1];
+          const minx = Math.max(0, Math.floor((Math.min(x1, x2) - reach) / CELL));
+          const maxx = Math.min(gw - 1, Math.floor((Math.max(x1, x2) + reach) / CELL));
+          const miny = Math.max(0, Math.floor((Math.min(y1, y2) - reach) / CELL));
+          const maxy = Math.min(gh - 1, Math.floor((Math.max(y1, y2) + reach) / CELL));
+          for (let cy = miny; cy <= maxy; cy++) {
+            for (let cx = minx; cx <= maxx; cx++) {
+              if (g[cy * gw + cx]) continue;
+              const px = cx * CELL + CELL / 2, py = cy * CELL + CELL / 2;
+              if (distSeg(px, py, x1, y1, x2, y2) <= reach) g[cy * gw + cx] = 1;
+            }
+          }
+        }
+        // 只点了一下没拖动
+        if (s.pts.length === 1) {
+          const [px, py] = s.pts[0];
+          const cx = Math.floor(px / CELL), cy = Math.floor(py / CELL);
+          if (cx >= 0 && cy >= 0 && cx < gw && cy < gh) g[cy * gw + cx] = 1;
+        }
+      }
+      this._grid = g; this._gw = gw; this._gh = gh;
+    }
+
+    hitWall(x, y) {
+      if (x < 0 || y < 0 || x >= this.W || y >= this.H) return true;
+      if (!this._grid) this._buildGrid();
+      const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
+      if (cx < 0 || cy < 0 || cx >= this._gw || cy >= this._gh) return false;
+      return this._grid[cy * this._gw + cx] === 1;
+    }
+
+    /* 只做几何判断，不建网格（放置时用） */
+    fitsWall(x, y, radius) {
+      radius = radius || 0;
+      for (const s of this.strokes) {
+        const half = (s.w || 7) / 2 + radius;
+        for (let i = 1; i < s.pts.length; i++) {
+          if (distSeg(x, y, s.pts[i - 1][0], s.pts[i - 1][1], s.pts[i][0], s.pts[i][1]) < half) return true;
+        }
+        if (s.pts.length === 1 && Math.hypot(x - s.pts[0][0], y - s.pts[0][1]) < half) return true;
+      }
+      return false;
+    }
+
+    /* ---------- 食物 ---------- */
+    _randSpot() {
+      const spawnPx = this.spawn[0] * this.W, spawnPy = this.spawn[1] * this.H;
+      for (let tries = 0; tries < 80; tries++) {
+        const x = 20 + this.rng() * Math.max(1, this.W - 40);
+        const y = 20 + this.rng() * Math.max(1, this.H - 40);
+        if (this.fitsWall(x, y, 10)) continue;
+        // 别放在出生点上，不然第一帧就被白吃
+        if (Math.hypot(x - spawnPx, y - spawnPy) < 60) continue;
+        return { x: x, y: y, r: 4.5 + this.rng() * 2, pulse: this.rng() * 6.283 };
+      }
+      return { x: this.W * 0.8, y: this.H * 0.2, r: 5, pulse: 0 };
+    }
+
+    _placeFood() {
+      this.food = [];
+      for (let i = 0; i < this.foodCount; i++) this.food.push(this._randSpot());
+    }
+
+    /* 只重铺"自然食物"，用户亲手摆的一个都不动。
+       开局时如果整表重建，用户布置好的食物就会被冲掉 —— 那又是一次"食物突然消失"。 */
+    _refreshNaturalFood() {
+      const mine = this.food.filter(f => f.mine);
+      this.food = [];
+      for (let i = 0; i < this.foodCount; i++) this.food.push(this._randSpot());
+      for (let i = 0; i < mine.length; i++) this.food.push(mine[i]);
+    }
+
+    /* 用户投放的食物不会被挤掉（旧版本超过上限就删最早的，这就是"食物突然消失"的原因） */
+    addFood(x, y) {
+      this.food.push({ x: x, y: y, r: 5.5, pulse: 0, mine: true });
+    }
+
+    removeFoodNear(x, y, radius) {
+      radius = radius || 18;
+      for (let i = this.food.length - 1; i >= 0; i--) {
+        const f = this.food[i];
+        if (Math.hypot(f.x - x, f.y - y) < radius) { this.food.splice(i, 1); return true; }
+      }
+      return false;
+    }
+
+    /* ---------- 种群 ---------- */
+    _preparePopulation() {
       this.pop = [];
       for (let i = 0; i < this.popSize; i++) {
         this.pop.push(this._newAgent(new MLP([SENSE, HIDDEN, ACT], this.rng)));
       }
-      this.food = [];
-      for (let i = 0; i < this.foodCount; i++) this.food.push(this._randSpot());
-      this.bestEver = 0;
-      this.bestFood = 0;
-      this.avgFood = 0;
-      this.history = [];
     }
 
     _newAgent(brain) {
+      const sx = this.spawn[0] * this.W, sy = this.spawn[1] * this.H;
+      let x = sx, y = sy;
+      for (let t = 0; t < 40; t++) {
+        const tx = sx + (this.rng() - 0.5) * 70;
+        const ty = sy + (this.rng() - 0.5) * 70;
+        if (!this.fitsWall(tx, ty, 6)) { x = tx; y = ty; break; }
+      }
       return {
-        x: this.W / 2 + (this.rng() - 0.5) * 60,
-        y: this.H / 2 + (this.rng() - 0.5) * 60,
-        vx: 0, vy: 0,         a: this.rng() * Math.PI * 2,
-        brain: brain,
-        food: 0,
-        path: 0,
-        approach: 0,
-        alive: true
+        x: x, y: y, vx: 0, vy: 0, a: this.rng() * Math.PI * 2,
+        brain: brain, food: 0, path: 0, approach: 0, stuck: 0
       };
     }
 
-    _randSpot() {
-      for (let tries = 0; tries < 40; tries++) {
-        const x = 18 + this.rng() * (this.W - 36);
-        const y = 18 + this.rng() * (this.H - 36);
-        let ok = true;
-        for (let i = 0; i < this.walls.length && ok; i++) {
-          const w = this.walls[i];
-          if (x > w.x - 14 && x < w.x + w.w + 14 && y > w.y - 14 && y < w.y + w.h + 14) ok = false;
-        }
-        if (ok) return { x: x, y: y, r: 4.5 + this.rng() * 2 };
+    /* ---------- 阶段控制 ---------- */
+    setPhase(p) {
+      if (p === 'running' && this.phase !== 'running') {
+        this.generation = 1;
+        this.tickCount = 0;
+        this.history = [];
+        this.bestEver = 0; this.bestFood = 0; this.avgFood = 0; this.eatenTotal = 0;
+        this._preparePopulation();
+        this._refreshNaturalFood();       // 保留用户摆的食物
       }
-      return { x: this.rng() * this.W, y: this.rng() * this.H, r: 5 };
+      this.phase = p;
     }
 
-    addFood(x, y) {
-      this.food.push({ x: x, y: y, r: 5 });
-      if (this.food.length > this.foodCount + 12) this.food.shift();
+    resetAll() {
+      this.phase = 'setup';
+      this.clearStrokes();
+      this.generation = 1; this.tickCount = 0; this.history = [];
+      this.bestEver = 0; this.bestFood = 0; this.avgFood = 0; this.eatenTotal = 0;
+      this._preparePopulation();
+      this._placeFood();
     }
 
-    addWall(x, y) {
-      this.walls.push({ x: x - 26, y: y - 9, w: 52, h: 18 });
-      if (this.walls.length > 14) this.walls.shift();
-    }
+    /* ---------- 每帧推进 ---------- */
+    tick() {
+      if (this.phase !== 'running') return false;
 
-    clearWalls() { this.walls = []; }
+      const inp = this._inp || (this._inp = new Float64Array(SENSE));
+      const maxD = Math.sqrt(this.W * this.W + this.H * this.H);
+
+      for (let i = 0; i < this.pop.length; i++) {
+        const a = this.pop[i];
+        const near = this.nearestFood(a);
+        const dx = near.f ? (near.f.x - a.x) : 0;
+        const dy = near.f ? (near.f.y - a.y) : 0;
+        const dist = Math.max(1, near.d);
+
+        inp[0] = dx / dist;
+        inp[1] = dy / dist;
+        inp[2] = 1 - Math.min(1, dist / (maxD * 0.5));
+        inp[3] = a.vx / 3.2;
+        inp[4] = a.vy / 3.2;
+        inp[5] = 1;
+
+        // 接近度塑形：没有它，第一代全员 0 分，选择压力只剩"少走路"，
+        // 进化会退化成一堆原地不动的虫子（遗传算法的经典陷阱）
+        a.approach += 1 / (1 + dist / 80);
+
+        const out = a.brain.predictAll(inp);
+        // 输出层是 sigmoid(0..1)，必须映射回 -1..1 才是左右对称的转向
+        const turn = ((out[0] - 0.5) * 2) * 0.30;
+        const thrust = Math.max(0, Math.min(1, out[1])) * 0.42;
+
+        a.a += turn;
+        a.vx += Math.cos(a.a) * thrust;
+        a.vy += Math.sin(a.a) * thrust;
+        a.vx *= 0.93; a.vy *= 0.93;
+
+        const sp = Math.hypot(a.vx, a.vy);
+        if (sp > 3.4) { a.vx = a.vx / sp * 3.4; a.vy = a.vy / sp * 3.4; }
+
+        const nx = a.x + a.vx;
+        const ny = a.y + a.vy;
+        a.path += Math.hypot(nx - a.x, ny - a.y);
+
+        let bounced = false;
+        if (this.hitWall(nx, a.y)) { a.vx = -a.vx * 0.55; bounced = true; }
+        else a.x = nx;
+        if (this.hitWall(a.x, ny)) { a.vy = -a.vy * 0.55; bounced = true; }
+        else a.y = ny;
+
+        a.stuck = bounced ? a.stuck + 1 : Math.max(0, a.stuck - 1);
+        if (a.stuck > 90) {                 // 卡墙里太久就送它回出生点，避免分数被无意义地耗掉
+          const na = this._newAgent(a.brain);
+          na.food = a.food; na.approach = a.approach; na.path = a.path;
+          this.pop[i] = na;
+        }
+
+        // 吃食物：吃掉后原地换一个位置重新生成，食物总数保持不变
+        for (let k = 0; k < this.food.length; k++) {
+          const f = this.food[k];
+          const rr = f.r + 6;
+          if ((f.x - a.x) * (f.x - a.x) + (f.y - a.y) * (f.y - a.y) < rr * rr) {
+            a.food++;
+            this.eatenTotal++;
+            if (f.mine) {
+              f.mine = false;
+              f.x = this._randSpot().x; f.y = this._randSpot().y;   // 用户放的吃完也换位置
+            } else {
+              const ns = this._randSpot();
+              f.x = ns.x; f.y = ns.y; f.r = ns.r;
+            }
+          }
+        }
+      }
+
+      this.tickCount++;
+      if (this.tickCount >= this.genLength) this.nextGeneration();
+      return true;
+    }
 
     nearestFood(a) {
       let best = null, bd = Infinity;
@@ -384,79 +730,7 @@
       return { f: best, d: Math.sqrt(bd) };
     }
 
-    _hitWall(x, y) {
-      for (let i = 0; i < this.walls.length; i++) {
-        const w = this.walls[i];
-        if (x > w.x && x < w.x + w.w && y > w.y && y < w.y + w.h) return true;
-      }
-      return false;
-    }
-
-    /* 推进一帧 */
-    tick() {
-      const inp = this._inp || (this._inp = new Float64Array(SENSE));
-      const maxD = Math.sqrt(this.W * this.W + this.H * this.H);
-
-      for (let i = 0; i < this.pop.length; i++) {
-        const a = this.pop[i];
-        const near = this.nearestFood(a);
-        const dx = near.f ? (near.f.x - a.x) : 0;
-        const dy = near.f ? (near.f.y - a.y) : 0;
-        const dist = Math.max(1, near.d);
-
-        inp[0] = dx / dist;                       // 食物方向（单位向量）
-        inp[1] = dy / dist;
-        inp[2] = 1 - Math.min(1, dist / (maxD * 0.5));  // 接近程度 0..1
-        inp[3] = a.vx / 3.2;                      // 当前速度
-        inp[4] = a.vy / 3.2;
-        inp[5] = 1;                               // 偏置
-
-        // 靠近食物就累积一点"接近分"。
-        // 没有这个塑形信号，第一代全员都是 0 分，选择压力只剩"少走路"，
-        // 进化会退化成一堆原地不动的虫子（这是进化算法的经典坑）。
-        a.approach += 1 / (1 + dist / 80);
-
-        const out = a.brain.predictAll(inp);
-        // 输出层是 sigmoid(0..1)，必须映射回 -1..1 才是左右对称的转向。
-        // 之前误用 tanh 包了一层，转向恒为正 —— 虫子只会往一边拐。
-        const turn = ((out[0] - 0.5) * 2) * 0.30;
-        const thrust = Math.max(0, Math.min(1, out[1])) * 0.42;
-
-        a.a += turn;
-        a.vx += Math.cos(a.a) * thrust;
-        a.vy += Math.sin(a.a) * thrust;
-        a.vx *= 0.93; a.vy *= 0.93;
-
-        // 限速
-        const sp = Math.hypot(a.vx, a.vy);
-        if (sp > 3.4) { a.vx = a.vx / sp * 3.4; a.vy = a.vy / sp * 3.4; }
-
-        const nx = a.x + a.vx;
-        const ny = a.y + a.vy;
-        const step = Math.hypot(nx - a.x, ny - a.y);
-        a.path += step;
-
-        // 撞墙 / 撞障碍：弹回
-        if (nx < 6 || nx > this.W - 6 || this._hitWall(nx, a.y)) { a.vx = -a.vx * 0.5; }
-        else a.x = nx;
-        if (ny < 6 || ny > this.H - 6 || this._hitWall(a.x, ny)) { a.vy = -a.vy * 0.5; }
-        else a.y = ny;
-
-        // 吃食物
-        for (let k = this.food.length - 1; k >= 0; k--) {
-          const f = this.food[k];
-          if ((f.x - a.x) * (f.x - a.x) + (f.y - a.y) * (f.y - a.y) < (f.r + 6) * (f.r + 6)) {
-            a.food++;
-            this.food[k] = this._randSpot();
-          }
-        }
-      }
-
-      this.tickCount++;
-      if (this.tickCount >= this.genLength) this.nextGeneration();
-    }
-
-    /* 吃到食物是大头，接近食物是塑形信号（保证第一代就有梯度可爬） */
+    /* 吃到食物是大头，接近食物是塑形信号 */
     fitness(a) { return a.food * 100 + a.approach * 0.05; }
 
     nextGeneration() {
@@ -468,16 +742,14 @@
       for (let i = 0; i < ranked.length; i++) sum += ranked[i].food;
       this.avgFood = sum / ranked.length;
       this.history.push({ gen: this.generation, best: best.food, avg: this.avgFood });
-      if (this.history.length > 60) this.history.shift();
+      if (this.history.length > 80) this.history.shift();
 
-      // 保留前 25% 直接进下一代（精英保留）
       const eliteN = Math.max(2, Math.round(this.popSize * 0.25));
       const elite = ranked.slice(0, eliteN);
       const next = [];
       for (let i = 0; i < elite.length && next.length < this.popSize; i++) {
         next.push(this._newAgent(elite[i].brain.clone()));
       }
-      // 其余由精英交叉 + 变异产生
       while (next.length < this.popSize) {
         const p1 = elite[Math.floor(this.rng() * elite.length)];
         const p2 = elite[Math.floor(this.rng() * elite.length)];
@@ -493,7 +765,6 @@
     _crossover(b1, b2) {
       const child = b1.clone();
       const rng = this.rng;
-      // 逐权重随机取父本之一
       for (let l = 0; l < child.W.length; l++) {
         const cw = child.W[l], w2 = b2.W[l];
         for (let i = 0; i < cw.length; i++) if (rng() < 0.5) cw[i] = w2[i];
@@ -505,17 +776,46 @@
 
     _mutate(m) {
       const rng = this.rng;
-      const rate = 0.10, sigma = 0.34, rerollP = 0.02;
+      const sigma = 0.34, rerollP = 0.02;
       for (let l = 0; l < m.W.length; l++) {
         const w = m.W[l], b = m.b[l];
         for (let i = 0; i < w.length; i++) {
           if (rng() < rerollP) w[i] = (rng() * 2 - 1) * Math.sqrt(1 / m.sizes[l]);
-          else if (rng() < rate) w[i] += gauss(rng) * sigma;
+          else if (rng() < this.mutation) w[i] += gauss(rng) * sigma;
         }
         for (let i = 0; i < b.length; i++) {
-          if (rng() < rate) b[i] += gauss(rng) * sigma;
+          if (rng() < this.mutation) b[i] += gauss(rng) * sigma;
         }
       }
+    }
+
+    /* ---------- 存档：把布局存下来下次接着用 ---------- */
+    exportLayout() {
+      return {
+        v: 1,
+        preset: this.presetKey,
+        spawn: this.spawn.slice(),
+        params: { popSize: this.popSize, genLength: this.genLength, foodCount: this.foodCount, mutation: this.mutation },
+        strokes: this.strokes.map(s => ({ w: s.w, pts: s.pts.map(pt => [Math.round(pt[0]), Math.round(pt[1])]) }))
+      };
+    }
+
+    importLayout(data) {
+      if (!data || !data.strokes) return false;
+      this.presetKey = 'custom';
+      this.spawn = (data.spawn || [0.5, 0.5]).slice();
+      this.strokes = data.strokes.map(s => ({ w: s.w || 7, pts: s.pts.map(pt => [pt[0], pt[1]]) }));
+      if (data.params) {
+        if (data.params.popSize) this.popSize = data.params.popSize;
+        if (data.params.genLength) this.genLength = data.params.genLength;
+        if (data.params.foodCount) this.foodCount = data.params.foodCount;
+        if (data.params.mutation != null) this.mutation = data.params.mutation;
+      }
+      this._grid = null;
+      this.phase = 'setup';
+      this._preparePopulation();
+      this._placeFood();
+      return true;
     }
   }
 
@@ -721,167 +1021,7 @@
   };
 
   /* ============================================================
-     5. 反转棋 AI —— minimax + alpha-beta
-     棋盘 Int8Array(64)：0 空，1 黑，-1 白
-     ============================================================ */
-  const DIRS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
-
-  const WEIGHTS = [
-    120, -20, 20, 5, 5, 20, -20, 120,
-    -20, -40, -5, -5, -5, -5, -40, -20,
-    20, -5, 15, 3, 3, 15, -5, 20,
-    5, -5, 3, 3, 3, 3, -5, 5,
-    5, -5, 3, 3, 3, 3, -5, 5,
-    20, -5, 15, 3, 3, 15, -5, 20,
-    -20, -40, -5, -5, -5, -5, -40, -20,
-    120, -20, 20, 5, 5, 20, -20, 120
-  ];
-
-  function newBoard() {
-    const b = new Int8Array(64);
-    b[27] = -1; b[28] = 1; b[35] = 1; b[36] = -1;   // 白 黑 / 黑 白
-    return b;
-  }
-
-  const xy = i => [i % 8, (i / 8) | 0];
-  const idx = (x, y) => y * 8 + x;
-
-  /* 该位置落子能翻哪些子；不能下返回 null */
-  function flipsFor(b, pos, player) {
-    if (b[pos] !== 0) return null;
-    const [x0, y0] = xy(pos);
-    let all = [];
-    for (let d = 0; d < 8; d++) {
-      const dx = DIRS[d][0], dy = DIRS[d][1];
-      let x = x0 + dx, y = y0 + dy;
-      const line = [];
-      while (x >= 0 && x < 8 && y >= 0 && y < 8 && b[idx(x, y)] === -player) {
-        line.push(idx(x, y));
-        x += dx; y += dy;
-      }
-      if (line.length && x >= 0 && x < 8 && y >= 0 && y < 8 && b[idx(x, y)] === player) {
-        all = all.concat(line);
-      }
-    }
-    return all.length ? all : null;
-  }
-
-  function legalMoves(b, player) {
-    const out = [];
-    for (let i = 0; i < 64; i++) {
-      if (flipsFor(b, i, player)) out.push(i);
-    }
-    return out;
-  }
-
-  function applyMove(b, pos, player) {
-    const fl = flipsFor(b, pos, player);
-    if (!fl) return null;
-    const nb = Int8Array.from(b);
-    nb[pos] = player;
-    fl.forEach(i => { nb[i] = player; });
-    return { board: nb, flipped: fl.length };
-  }
-
-  function countDiscs(b) {
-    let black = 0, white = 0;
-    for (let i = 0; i < 64; i++) {
-      if (b[i] === 1) black++;
-      else if (b[i] === -1) white++;
-    }
-    return { black: black, white: white };
-  }
-
-  function evaluate(b, me) {
-    const opp = -me;
-    let posScore = 0;
-    for (let i = 0; i < 64; i++) {
-      if (b[i] === me) posScore += WEIGHTS[i];
-      else if (b[i] === opp) posScore -= WEIGHTS[i];
-    }
-    const myMob = legalMoves(b, me).length;
-    const opMob = legalMoves(b, opp).length;
-    const c = countDiscs(b);
-    const discDiff = me === 1 ? c.black - c.white : c.white - c.black;
-    // 权重：位置 > 机动性 > 子数（中盘阶段子多反而不好，所以子数权重最低）
-    return posScore * 1.0 + (myMob - opMob) * 12 + discDiff * 1.5;
-  }
-
-  function bestMove(board, player, depth, seed) {
-    const rng = makeRng(seed || 99);
-    let moves = legalMoves(board, player);
-    if (!moves.length) return null;
-    if (moves.length === 1) return moves[0];
-
-    let nodes = 0;
-    const NODE_CAP = 260000;
-
-    function search(b, me, d, alpha, beta, passed) {
-      nodes++;
-      if (nodes > NODE_CAP) return evaluate(b, player);
-      const lm = legalMoves(b, me);
-      if (!lm.length) {
-        if (passed) {
-          // 双方都无子可下，终局
-          const c = countDiscs(b);
-          const diff = player === 1 ? c.black - c.white : c.white - c.black;
-          return diff * 10000;
-        }
-        return search(b, -me, d, alpha, beta, true);
-      }
-      if (d === 0) return evaluate(b, player);
-
-      // 落子排序：翻得多的先搜，剪枝效率高很多
-      const ordered = lm.map(m => ({ m: m, f: flipsFor(b, m, me).length }))
-                         .sort((p, q) => q.f - p.f);
-
-      if (me === player) {
-        let best = -Infinity;
-        for (let i = 0; i < ordered.length; i++) {
-          const step = applyMove(b, ordered[i].m, me);
-          const v = search(step.board, -me, d - 1, alpha, beta, false);
-          if (v > best) best = v;
-          if (best > alpha) alpha = best;
-          if (alpha >= beta) break;
-        }
-        return best;
-      } else {
-        let best = Infinity;
-        for (let i = 0; i < ordered.length; i++) {
-          const step = applyMove(b, ordered[i].m, me);
-          const v = search(step.board, -me, d - 1, alpha, beta, false);
-          if (v < best) best = v;
-          if (best < beta) beta = best;
-          if (alpha >= beta) break;
-        }
-        return best;
-      }
-    }
-
-    let bestScore = -Infinity, bestList = [];
-    const ordered = moves.map(m => ({ m: m, f: flipsFor(board, m, player).length }))
-                         .sort((p, q) => q.f - p.f);
-
-    for (let i = 0; i < ordered.length; i++) {
-      const step = applyMove(board, ordered[i].m, player);
-      const v = search(step.board, -player, depth - 1, -Infinity, Infinity, false);
-      if (v > bestScore) { bestScore = v; bestList = [ordered[i].m]; }
-      else if (v === bestScore) bestList.push(ordered[i].m);
-    }
-    return bestList[Math.floor(rng() * bestList.length)];
-  }
-
-  /* 带随机性的"简单"档：有一定概率不走最优 */
-  function easyMove(board, player, seed) {
-    const rng = makeRng(seed || 5);
-    const moves = legalMoves(board, player);
-    if (!moves.length) return null;
-    if (rng() < 0.45) return moves[Math.floor(rng() * moves.length)];
-    return bestMove(board, player, 1, seed);
-  }
-
-  /* ============================================================
-     6. 寻路算法 —— BFS / A* / 贪心最优优先
+     5. 寻路算法 —— BFS / A* / 贪心最优优先
      ============================================================ */
   function gridNeighbors(grid, w, h, i) {
     const x = i % w, y = (i / w) | 0;
@@ -978,11 +1118,10 @@
      导出
      ============================================================ */
   global.AI = {
-    makeRng, gauss, sigmoid,
+    makeRng, gauss, sigmoid, distSeg,
     MLP, DATASETS, makeDataset,
-    NeuroWorld, SENSE, HIDDEN, ACT,
+    NeuroWorld, PRESETS, DIFFICULTY, SENSE, HIDDEN, ACT,
     RPSMind, MOVES, BEATS, beats, result, EXPERT_NAMES,
-    newBoard, flipsFor, legalMoves, applyMove, countDiscs, evaluate, bestMove, easyMove, WEIGHTS, idx, xy,
     solve, manhattan
   };
 

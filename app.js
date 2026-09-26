@@ -16,7 +16,7 @@
   const get = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const set = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
 
-  const CAT_ORDER = ['神经网络', 'AI 进化', 'AI 对战', 'AI 算法'];
+  const CAT_ORDER = ['神经网络', 'AI 进化', 'AI 对战', 'AI 算法', '摄像头', '声音'];
 
   const S = {
     screen: 'screen-home',
@@ -283,24 +283,8 @@
   $('#sheetClose').addEventListener('click', () => closeSheet(true));
   $('#sheetScrim').addEventListener('click', () => closeSheet(true));
 
-  (function dragClose() {
-    const handle = $('#sheetGrabber'), panel = $('#sheetPanel');
-    let y0 = null;
-    handle.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true });
-    handle.addEventListener('touchmove', e => {
-      if (y0 === null) return;
-      const dy = Math.max(0, e.touches[0].clientY - y0);
-      panel.style.transition = 'none';
-      panel.style.transform = 'translate(-50%, ' + dy + 'px)';
-    }, { passive: true });
-    handle.addEventListener('touchend', e => {
-      const dy = Math.max(0, (e.changedTouches[0] || {}).clientY - y0);
-      panel.style.transition = '';
-      panel.style.transform = '';
-      y0 = null;
-      if (dy > 110) closeSheet(true);
-    });
-  })();
+  /* 面板是全屏固定的，不再支持下拉关闭 ——
+     用户要求进入功能后就是全屏，不要靠手势去切。 */
 
   $('#sheetFav').addEventListener('click', () => { if (S.feature) toggleFav(S.feature); });
   function syncSheetFav() {

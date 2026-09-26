@@ -333,84 +333,271 @@
 
   /* ============================================================
      2. 神经进化模拟
+     ------------------------------------------------------------
+     流程分两阶段，这是关键：
+       布置阶段 → 画障碍、摆食物，随便改，虫子不动
+       进化阶段 → 障碍锁死，只能放/擦食物，虫子开始跑
+     障碍是手绘笔画（可任意弯曲），数量和长度都不设上限。
      ============================================================ */
   add({
     id: 'neuro',
     name: '神经进化模拟',
     cat: 'AI 进化',
-    desc: '一群神经网络小虫，靠遗传算法一代代学会找吃的',
-    tags: ['进化', '遗传算法', '神经进化', '仿真', '人工生命', '人工智能'],
+    desc: '神经网络大脑 + 遗传算法。先自己画好障碍，再放它们进去学找吃的',
+    tags: ['进化', '遗传算法', '神经进化', '仿真', '人工生命', '人工智能', '虫子', '迷宫'],
     icon: '<circle cx="7" cy="12" r="2.4"/><circle cx="16" cy="7" r="2"/><circle cx="17" cy="15" r="2"/><path d="M9.2 11 14 7.7M9.3 13 15 14.6"/>',
     render(root, kit) {
       const AI = kit.AI;
-      let world = null;
-      let mode = 'food';
-      let running = true;
+      const SAVE_KEY = 'myapp.neuroLayout';
 
+      let world = null;
+      let mode = 'wall';
+      let penW = 9;
+      let paused = false;
+
+      /* ---------- 阶段提示条 ---------- */
+      const banner = kit.el('div', 'phasebar');
+      root.appendChild(banner);
+
+      /* ---------- 画布 ---------- */
       const wrap = kit.el('div', 'cvlayer');
-      const cv = kit.makeCanvas(wrap, 0.66);
+      const cv = kit.makeCanvas(wrap, 0.62);
       root.appendChild(wrap);
 
+      const tip = kit.el('p', 'note');
+      root.appendChild(tip);
+
+      /* ---------- 工具 ---------- */
+      const toolRow = kit.el('div', 'chiprow');
+      const TOOLS = [['wall', '画障碍'], ['food', '放食物'], ['erase', '擦食物']];
+      const toolChips = TOOLS.map(([k, t]) => {
+        const b = kit.el('button', 'chip' + (k === mode ? ' chip--on' : ''), t);
+        b.type = 'button';
+        b.addEventListener('click', () => { mode = k; syncTools(); });
+        toolRow.appendChild(b);
+        return b;
+      });
+
+      const penBox = kit.el('div', 'penbox');
+      const PEN = [[5, '细'], [9, '中'], [16, '粗']];
+      const penChips = PEN.map(([w, t]) => {
+        const b = kit.el('button', 'chip chip--sm' + (w === penW ? ' chip--on' : ''), t);
+        b.type = 'button';
+        b.addEventListener('click', () => {
+          penW = w;
+          penChips.forEach((c, i) => c.classList.toggle('chip--on', PEN[i][0] === w));
+          if (world) world.penWidth = w;
+        });
+        penBox.appendChild(b);
+        return b;
+      });
+      penBox.insertBefore(kit.el('span', 'penbox__k', '笔宽'), penBox.firstChild);
+      toolRow.appendChild(penBox);
+      root.appendChild(toolRow);
+
+      /* ---------- 预设布局 ---------- */
+      const preRow = kit.el('div', 'chiprow');
+      preRow.appendChild(kit.el('span', 'rowlabel', '场地'));
+      const preKeys = Object.keys(AI.PRESETS);
+      const preChips = preKeys.map(k => {
+        const b = kit.el('button', 'chip', AI.PRESETS[k].name);
+        b.type = 'button';
+        b.title = AI.PRESETS[k].desc;
+        b.addEventListener('click', () => {
+          if (!ensure()) return;
+          world.applyPreset(k);
+          world.penWidth = penW;
+          paused = false;
+          syncAll();
+          kit.toast('已换成「' + AI.PRESETS[k].name + '」，可以开始进化了');
+        });
+        preRow.appendChild(b);
+        return b;
+      });
+      root.appendChild(preRow);
+
+      /* ---------- 难度 ---------- */
+      const difRow = kit.el('div', 'chiprow');
+      difRow.appendChild(kit.el('span', 'rowlabel', '难度'));
+      const difKeys = Object.keys(AI.DIFFICULTY);
+      const difChips = difKeys.map(k => {
+        const b = kit.el('button', 'chip' + (k === 'normal' ? ' chip--on' : ''), AI.DIFFICULTY[k].name);
+        b.type = 'button';
+        b.addEventListener('click', () => {
+          if (!ensure()) return;
+          world.setDifficulty(k);
+          difChips.forEach((c, i) => c.classList.toggle('chip--on', difKeys[i] === k));
+          syncAll();
+          kit.toast('难度：' + AI.DIFFICULTY[k].name + '（一代 ' + AI.DIFFICULTY[k].genLength + ' 帧）');
+        });
+        difRow.appendChild(b);
+        return b;
+      });
+      root.appendChild(difRow);
+
+      /* ---------- 主控按钮 ---------- */
+      const mainRow = kit.el('div', 'mainrow');
+      const btnStart = kit.el('button', 'btn', '开始进化');
+      btnStart.type = 'button';
+      btnStart.addEventListener('click', () => {
+        if (!ensure()) return;
+        if (world.phase === 'setup') {
+          world.penWidth = penW;
+          world.setPhase('running');
+          paused = false;
+          syncAll();
+          kit.toast('开跑，障碍已锁定');
+        } else {
+          paused = !paused;
+          syncAll();
+        }
+      });
+      const btnSetup = kit.el('button', 'chip', '重新布置');
+      btnSetup.type = 'button';
+      btnSetup.addEventListener('click', () => {
+        if (!ensure()) return;
+        world.setPhase('setup');
+        paused = false;
+        syncAll();
+      });
+      mainRow.appendChild(btnStart);
+      mainRow.appendChild(btnSetup);
+      root.appendChild(mainRow);
+
+      /* ---------- 辅助操作 ---------- */
+      const utilRow = kit.el('div', 'chiprow');
+      const mkUtil = (label, fn) => {
+        const b = kit.el('button', 'chip chip--sm', label);
+        b.type = 'button';
+        b.addEventListener('click', () => { if (ensure()) { fn(); syncAll(); } });
+        utilRow.appendChild(b);
+        return b;
+      };
+      mkUtil('撤销一笔', () => { world.undoStroke(); });
+      mkUtil('清空障碍', () => { world.clearStrokes(); kit.toast('障碍已清空'); });
+      mkUtil('保存布局', () => {
+        try {
+          localStorage.setItem(SAVE_KEY, JSON.stringify(world.exportLayout()));
+          kit.toast('布局 + 参数已存到这台 iPad');
+        } catch (_) { kit.toast('存不下（存储空间不足）'); }
+      });
+      mkUtil('读取布局', () => {
+        let raw = null;
+        try { raw = localStorage.getItem(SAVE_KEY); } catch (_) {}
+        if (!raw) { kit.toast('还没有保存过布局'); return; }
+        try {
+          if (world.importLayout(JSON.parse(raw))) kit.toast('已恢复上次保存的布局');
+        } catch (_) { kit.toast('存档坏了，读取失败'); }
+      });
+      mkUtil('清空食物', () => { world.food.length = 0; world._placeFood(); });
+      root.appendChild(utilRow);
+
+      /* ---------- 数据 ---------- */
       const stats = kit.el('div', 'statgrid');
       const sGen = kit.stat(stats, '世代', '1');
       const sLeft = kit.stat(stats, '本代剩余', '—');
       const sBest = kit.stat(stats, '本代最佳', '0');
-      const sAvg = kit.stat(stats, '种群平均', '0.0');
+      const sEaten = kit.stat(stats, '累计吃到', '0');
       root.appendChild(stats);
 
-      const row = kit.el('div', 'chiprow');
-      const bPause = kit.el('button', 'chip chip--on', '暂停');
-      bPause.type = 'button';
-      bPause.addEventListener('click', () => {
-        running = !running;
-        bPause.textContent = running ? '暂停' : '继续';
-        bPause.classList.toggle('chip--on', running);
-      });
-      const bFood = kit.el('button', 'chip chip--on', '点屏幕放食物');
-      bFood.type = 'button';
-      const bWall = kit.el('button', 'chip', '点屏幕放障碍');
-      bWall.type = 'button';
-      [bFood, bWall].forEach((b, i) => b.addEventListener('click', () => {
-        mode = i === 0 ? 'food' : 'wall';
-        bFood.classList.toggle('chip--on', mode === 'food');
-        bWall.classList.toggle('chip--on', mode === 'wall');
-        tip.textContent = mode === 'food' ? '点画布任意位置投放食物' : '点画布任意位置摆放障碍墙';
-      }));
-      const bRestart = kit.el('button', 'chip', '从头再来');
-      bRestart.type = 'button';
-      bRestart.addEventListener('click', () => { world = null; ensure(); });
-      row.appendChild(bPause); row.appendChild(bFood); row.appendChild(bWall); row.appendChild(bRestart);
-      root.appendChild(row);
-
-      const tip = kit.el('p', 'note', '点画布任意位置投放食物');
-      root.appendChild(tip);
-
       const chartWrap = kit.el('div', 'cvlayer');
-      const cChart = kit.makeCanvas(chartWrap, 0.20);
+      const cChart = kit.makeCanvas(chartWrap, 0.19);
       root.appendChild(chartWrap);
-      const chartTip = kit.el('p', 'note', '历代表现：柱子越高＝那一代觅食能力越强');
-      root.appendChild(chartTip);
+      root.appendChild(kit.el('p', 'note', '进化曲线：蓝柱＝那一代最好的虫子吃了几个，青色横线＝全群平均'));
+
+      /* ---------- 同步界面状态 ---------- */
+      function syncTools() {
+        toolChips.forEach((c, i) => c.classList.toggle('chip--on', TOOLS[i][0] === mode));
+        const locked = world && world.phase === 'running';
+        if (mode === 'wall' && locked) {
+          tip.textContent = '进化进行中，障碍已锁定。想改障碍请先点「重新布置」。';
+        } else if (mode === 'wall') {
+          tip.textContent = '用手指在画布上画出任意弯曲的障碍线，画多少都行。';
+        } else if (mode === 'food') {
+          tip.textContent = '点一下就是一颗食物。你摆的食物不会被系统清掉。';
+        } else {
+          tip.textContent = '点食物把它擦掉。';
+        }
+      }
+
+      function syncAll() {
+        if (!world) return;
+        const running = world.phase === 'running';
+        banner.className = 'phasebar ' + (running ? 'is-run' : 'is-setup');
+        banner.innerHTML = running
+          ? '<b>进化中</b><span>第 ' + world.generation + ' 代 · 障碍已锁定 · 还能放食物</span>'
+          : '<b>布置阶段</b><span>先画障碍、摆食物，好了点下面的「开始进化」</span>';
+        btnStart.textContent = running ? (paused ? '继续' : '暂停') : '开始进化';
+        btnStart.className = 'btn' + (running ? ' btn--pause' : '') + (paused ? ' is-paused' : '');
+        btnSetup.style.display = running ? '' : 'none';
+        preChips.forEach((c, i) => c.classList.toggle('chip--on', preKeys[i] === world.presetKey));
+        syncTools();
+      }
+
+      /* ---------- 世界与尺寸 ---------- */
+      function resizeWorld(nw, nh) {
+        if (!world) return;
+        const sx = nw / world.W, sy = nh / world.H;
+        world.strokes.forEach(s => s.pts.forEach(pt => { pt[0] *= sx; pt[1] *= sy; }));
+        world.pop.forEach(a => { a.x *= sx; a.y *= sy; });
+        world.food.forEach(f => { f.x *= sx; f.y *= sy; });
+        world.W = nw; world.H = nh;
+        world._grid = null;
+      }
 
       function ensure() {
         const w = cv.w, h = cv.h;
         if (!w || !h) return false;
-        if (!world || Math.abs(world.W - w) > 14 || Math.abs(world.H - h) > 14) {
+        if (!world) {
           world = new AI.NeuroWorld({
-            width: w, height: h, popSize: 44, genLength: 760, foodCount: 15, seed: 20260826
+            width: w, height: h, preset: 'empty', difficulty: 'normal', seed: 20260926
           });
+          world.penWidth = penW;
+          syncAll();
+        } else if (Math.abs(world.W - w) > 4 || Math.abs(world.H - h) > 4) {
+          resizeWorld(w, h);      // 旋转屏幕时按比例搬过去，不丢布局
         }
         return true;
       }
 
-      /* 画布交互 */
+      /* ---------- 触摸交互 ---------- */
       cv.cv.style.touchAction = 'none';
+      let drawing = false;
+
+      function local(e) {
+        const r = cv.cv.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      }
+
       cv.cv.addEventListener('pointerdown', e => {
         if (!ensure()) return;
-        const r = cv.cv.getBoundingClientRect();
-        const x = e.clientX - r.left, y = e.clientY - r.top;
-        if (mode === 'food') world.addFood(x, y); else world.addWall(x, y);
+        const pt = local(e);
+        cv.cv.setPointerCapture && cv.cv.setPointerCapture(e.pointerId);
+
+        if (mode === 'food') { world.addFood(pt.x, pt.y); return; }
+        if (mode === 'erase') { world.removeFoodNear(pt.x, pt.y, 22); return; }
+
+        if (world.phase === 'running') { kit.toast('障碍已锁定，先「重新布置」'); return; }
+        drawing = true;
+        world.penWidth = penW;
+        world.beginStroke(pt.x, pt.y);
       });
 
+      cv.cv.addEventListener('pointermove', e => {
+        if (!drawing || !world) return;
+        const pt = local(e);
+        if (mode === 'erase') { world.removeFoodNear(pt.x, pt.y, 22); return; }
+        world.extendStroke(pt.x, pt.y);
+      });
+
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+        cv.cv.addEventListener(ev, () => {
+          if (drawing && world) world.endStroke();
+          drawing = false;
+        }));
+
+      /* ---------- 绘制 ---------- */
+      let t = 0;
       function draw() {
         if (!world) return;
         const ctx = cv.ctx, w = cv.w, h = cv.h;
@@ -418,24 +605,39 @@
         ctx.fillStyle = '#050C1C';
         ctx.fillRect(0, 0, w, h);
 
-        // 障碍
-        for (const wl of world.walls) {
-          ctx.fillStyle = 'rgba(120,160,230,.22)';
-          ctx.strokeStyle = 'rgba(150,190,255,.35)';
-          ctx.lineWidth = 1;
-          roundRect(ctx, wl.x, wl.y, wl.w, wl.h, 6);
-          ctx.fill(); ctx.stroke();
+        // 障碍笔画
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        const locked = world.phase === 'running';
+        for (let i = 0; i < world.strokes.length; i++) {
+          const s = world.strokes[i];
+          if (!s.pts.length) continue;
+          ctx.strokeStyle = locked ? 'rgba(120,160,230,.30)' : 'rgba(140,185,255,.42)';
+          ctx.lineWidth = (s.w || 7) + 6;
+          strokePath(ctx, s.pts);
+          ctx.strokeStyle = locked ? 'rgba(150,190,255,.72)' : 'rgba(190,220,255,.92)';
+          ctx.lineWidth = s.w || 7;
+          strokePath(ctx, s.pts);
         }
 
-        // 食物
+        // 出生点
+        const sx = world.spawn[0] * w, sy = world.spawn[1] * h;
+        ctx.strokeStyle = 'rgba(150,200,255,.45)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.arc(sx, sy, 15, 0, 6.2832); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 食物（会呼吸）
         for (const f of world.food) {
-          ctx.fillStyle = 'rgba(120,255,200,.16)';
-          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 3.4, 0, 6.2832); ctx.fill();
-          ctx.fillStyle = '#7CFFC8';
-          ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 6.2832); ctx.fill();
+          const pulse = 1 + Math.sin(t * 0.05 + (f.pulse || 0)) * 0.18;
+          ctx.fillStyle = f.mine ? 'rgba(255,214,120,.20)' : 'rgba(120,255,200,.15)';
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 3.4 * pulse, 0, 6.2832); ctx.fill();
+          ctx.fillStyle = f.mine ? '#FFD678' : '#7CFFC8';
+          ctx.beginPath(); ctx.arc(f.x, f.y, f.r * pulse, 0, 6.2832); ctx.fill();
         }
 
-        // 小虫
+        // 虫子
         let bestF = 0;
         for (const a of world.pop) if (a.food > bestF) bestF = a.food;
         for (const a of world.pop) {
@@ -444,18 +646,36 @@
           ctx.save();
           ctx.translate(a.x, a.y);
           ctx.rotate(a.a);
-          ctx.fillStyle = 'hsla(' + hue + ',92%,' + (isBest ? 72 : 60) + '%,' + (isBest ? 0.95 : 0.62) + ')';
+          ctx.fillStyle = 'hsla(' + hue + ',92%,' + (isBest ? 74 : 60) + '%,' + (isBest ? 0.96 : 0.62) + ')';
           ctx.beginPath();
-          ctx.moveTo(6, 0); ctx.lineTo(-4, 3.6); ctx.lineTo(-4, -3.6);
+          ctx.moveTo(6.5, 0); ctx.lineTo(-4.2, 3.8); ctx.lineTo(-4.2, -3.8);
           ctx.closePath();
           ctx.fill();
           ctx.restore();
           if (isBest) {
-            ctx.strokeStyle = 'rgba(255,255,255,.55)';
+            ctx.strokeStyle = 'rgba(255,255,255,.5)';
             ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(a.x, a.y, 8, 0, 6.2832); ctx.stroke();
+            ctx.beginPath(); ctx.arc(a.x, a.y, 8.5, 0, 6.2832); ctx.stroke();
           }
         }
+
+        if (world.phase === 'setup') {
+          ctx.fillStyle = 'rgba(255,255,255,.30)';
+          ctx.font = '12px -apple-system, sans-serif';
+          ctx.fillText('布置阶段 · 虫子待命中，先画好障碍', 10, h - 10);
+        }
+      }
+
+      function strokePath(ctx, pts) {
+        ctx.beginPath();
+        if (pts.length === 1) {
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          ctx.lineTo(pts[0][0] + 0.1, pts[0][1]);
+        } else {
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        }
+        ctx.stroke();
       }
 
       function drawChart() {
@@ -466,7 +686,7 @@
         if (hist.length < 2) {
           ctx.fillStyle = 'rgba(255,255,255,.28)';
           ctx.font = '11px -apple-system, sans-serif';
-          ctx.fillText('跑几代之后这里会显示进化曲线…', 6, h / 2 + 4);
+          ctx.fillText('跑完一代之后这里会出现进化曲线…', 6, h / 2 + 4);
           return;
         }
         const maxV = Math.max(1, ...hist.map(x => x.best));
@@ -477,7 +697,7 @@
           ctx.fillStyle = 'rgba(90,170,255,.55)';
           ctx.fillRect(x + 1, h - bh - 2, Math.max(1.5, bw - 2), bh);
           const ah = (hist[i].avg / maxV) * (h - 12);
-          ctx.fillStyle = 'rgba(140,255,220,.30)';
+          ctx.fillStyle = 'rgba(140,255,220,.35)';
           ctx.fillRect(x + 1, h - ah - 2, Math.max(1.5, bw - 2), 1.6);
         }
         ctx.fillStyle = 'rgba(255,255,255,.35)';
@@ -485,6 +705,7 @@
         ctx.fillText('峰值 ' + maxV, 4, 11);
       }
 
+      /* ---------- 主循环 ---------- */
       let raf = 0, last = 0, acc = 0, frames = 0;
       function loop(ts) {
         raf = requestAnimationFrame(loop);
@@ -493,20 +714,27 @@
         if (acc < 1000 / 60) return;
         acc = 0;
         frames++;
+        t++;
 
         if (!ensure()) return;
-        if (running) { world.tick(); world.tick(); }
+        if (world.phase === 'running' && !paused) { world.tick(); world.tick(); }
 
         sGen.textContent = String(world.generation);
-        sLeft.textContent = Math.max(0, world.genLength - world.tickCount) + ' 帧';
+        sLeft.textContent = world.phase === 'running'
+          ? Math.max(0, world.genLength - world.tickCount) + ''
+          : world.genLength + '';
         sBest.textContent = String(world.bestFood);
-        sAvg.textContent = world.avgFood.toFixed(1);
+        sEaten.textContent = String(world.eatenTotal);
+
         draw();
-        if (frames % 20 === 0) drawChart();
+        if (frames % 18 === 0) drawChart();
       }
 
       afterPaint(() => { raf = requestAnimationFrame(loop); });
-      return () => cancelAnimationFrame(raf);
+      return () => {
+        cancelAnimationFrame(raf);
+        if (world) world.phase = 'setup';
+      };
     }
   });
 
@@ -687,196 +915,7 @@
   });
 
   /* ============================================================
-     4. 反转棋 AI
-     ============================================================ */
-  add({
-    id: 'reversi',
-    name: '反转棋 AI',
-    cat: 'AI 对战',
-    desc: '和 minimax + alpha-beta 剪枝的 AI 下棋，可选难度',
-    tags: ['棋', '黑白棋', '反转棋', '奥赛罗', '对战', 'PK', '博弈', 'minimax', 'AI'],
-    icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor" stroke="none"/>',
-    render(root, kit) {
-      const AI = kit.AI;
-      const HUMAN = 1, AIC = -1;
-
-      let board = AI.newBoard();
-      let turn = HUMAN;
-      let over = false;
-      let busy = false;
-      let depth = 3;
-      let passNote = '';
-
-      const difRow = kit.el('div', 'chiprow');
-      const DIFF = [['简单', 1], ['普通', 3], ['困难', 5]];
-      const difChips = DIFF.map(([t, d]) => {
-        const b = kit.el('button', 'chip' + (d === depth ? ' chip--on' : ''), t);
-        b.type = 'button';
-        b.addEventListener('click', () => {
-          depth = d;
-          difChips.forEach((c, i) => c.classList.toggle('chip--on', DIFF[i][1] === d));
-          newGame();
-        });
-        difRow.appendChild(b);
-        return b;
-      });
-      root.appendChild(difRow);
-
-      const status = kit.el('div', 'statusbar');
-      root.appendChild(status);
-
-      const wrap = kit.el('div', 'cvlayer');
-      const cv = kit.makeCanvas(wrap, 1.0);
-      wrap.style.maxWidth = '430px';       // 约束包裹层，画布尺寸会跟着量准
-      wrap.style.margin = '0 auto';
-      root.appendChild(wrap);
-
-      const tail = kit.el('div', 'chiprow');
-      const bNew = kit.el('button', 'chip chip--on', '重新开局');
-      bNew.type = 'button';
-      bNew.addEventListener('click', newGame);
-      tail.appendChild(bNew);
-      root.appendChild(tail);
-
-      const note = kit.el('p', 'note', '你执黑先手。棋盘上的小点是可以落子的位置。');
-      root.appendChild(note);
-
-      function newGame() {
-        board = AI.newBoard();
-        turn = HUMAN; over = false; busy = false; passNote = '';
-        draw(); updateStatus();
-      }
-
-      function score() { return AI.countDiscs(board); }
-
-      function updateStatus() {
-        const c = score();
-        if (over) {
-          const mine = c.black, its = c.white;
-          const res = mine > its ? '你赢了' : (mine < its ? 'AI 赢了' : '平局');
-          status.innerHTML = '<b class="' + (mine > its ? 'ok' : mine < its ? 'bad' : '') + '">' + res + '</b>' +
-            '<span class="statusbar__sub">最终 ' + mine + ' : ' + its + '</span>';
-          return;
-        }
-        const who = busy ? 'AI 思考中…' : (turn === HUMAN ? '轮到你下' : 'AI 回合');
-        status.innerHTML = '<b>' + who + '</b><span class="statusbar__sub">' +
-          '你 ' + c.black + ' : ' + c.white + ' AI' + (passNote ? ' · ' + passNote : '') + '</span>';
-      }
-
-      function draw() {
-        const ctx = cv.ctx, w = cv.w;
-        if (!w) return;
-        const cell = w / 8;
-        ctx.clearRect(0, 0, w, w);
-        ctx.fillStyle = '#071228';
-        roundRect(ctx, 0, 0, w, w, 14);
-        ctx.fill();
-
-        // 格线
-        ctx.strokeStyle = 'rgba(140,190,255,.10)';
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        for (let i = 1; i < 8; i++) {
-          ctx.moveTo(i * cell, 0); ctx.lineTo(i * cell, w);
-          ctx.moveTo(0, i * cell); ctx.lineTo(w, i * cell);
-        }
-        ctx.stroke();
-
-        // 可落子提示
-        if (!over && !busy && turn === HUMAN) {
-          AI.legalMoves(board, HUMAN).forEach(mv => {
-            const x = (mv % 8) * cell + cell / 2;
-            const y = ((mv / 8) | 0) * cell + cell / 2;
-            ctx.fillStyle = 'rgba(120,255,210,.55)';
-            ctx.beginPath(); ctx.arc(x, y, cell * 0.11, 0, 6.2832); ctx.fill();
-          });
-        }
-
-        // 棋子
-        for (let i = 0; i < 64; i++) {
-          if (!board[i]) continue;
-          const cx = (i % 8) * cell + cell / 2;
-          const cy = ((i / 8) | 0) * cell + cell / 2;
-          const r = cell * 0.38;
-          const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.15, cx, cy, r);
-          if (board[i] === 1) { g.addColorStop(0, '#2B3A55'); g.addColorStop(1, '#060B16'); }
-          else { g.addColorStop(0, '#FFFFFF'); g.addColorStop(1, '#B9CBEA'); }
-          ctx.fillStyle = g;
-          ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill();
-          ctx.strokeStyle = 'rgba(255,255,255,.20)';
-          ctx.lineWidth = 0.8;
-          ctx.stroke();
-        }
-      }
-
-      function endCheck() {
-        const c = score();
-        if (c.black + c.white === 64) { over = true; return true; }
-        if (!AI.legalMoves(board, 1).length && !AI.legalMoves(board, -1).length) { over = true; return true; }
-        return false;
-      }
-
-      function advance() {
-        if (endCheck()) { draw(); updateStatus(); return; }
-        let guard = 0;
-        while (!AI.legalMoves(board, turn).length && guard++ < 3) {
-          turn = -turn;
-          passNote = (turn === HUMAN ? 'AI' : '你') + '无子可下，跳过';
-        }
-        if (endCheck()) { draw(); updateStatus(); return; }
-        draw(); updateStatus();
-        if (turn === AIC && !over) setTimeout(aiTurn, 320);
-      }
-
-      function aiTurn() {
-        if (over) return;
-        busy = true; updateStatus();
-        setTimeout(() => {
-          const seed = (Date.now() % 100000) + 1;
-          const mv = depth <= 1 ? AI.easyMove(board, AIC, seed) : AI.bestMove(board, AIC, depth, seed);
-          if (mv !== null) {
-            const step = AI.applyMove(board, mv, AIC);
-            if (step) board = step.board;
-          }
-          turn = HUMAN;
-          busy = false;
-          draw();
-          updateStatus();
-          if (endCheck()) { draw(); updateStatus(); return; }
-          if (!AI.legalMoves(board, HUMAN).length) {
-            passNote = '你无子可下，跳过';
-            turn = AIC;
-            updateStatus();
-            setTimeout(aiTurn, 320);
-          }
-        }, 40);
-      }
-
-      cv.cv.style.touchAction = 'manipulation';
-      cv.cv.addEventListener('pointerdown', e => {
-        if (over || busy || turn !== HUMAN) return;
-        const r = cv.cv.getBoundingClientRect();
-        const x = Math.floor((e.clientX - r.left) / (r.width / 8));
-        const y = Math.floor((e.clientY - r.top) / (r.height / 8));
-        if (x < 0 || y < 0 || x > 7 || y > 7) return;
-        const pos = AI.idx(x, y);
-        const step = AI.applyMove(board, pos, HUMAN);
-        if (!step) return;
-        board = step.board;
-        turn = AIC;
-        passNote = '';
-        draw();
-        advance();
-      });
-
-      newGame();
-      later(() => { draw(); });
-      return () => {};
-    }
-  });
-
-  /* ============================================================
-     5. AI 寻路竞技场
+     4. AI 寻路竞技场
      ============================================================ */
   add({
     id: 'path',

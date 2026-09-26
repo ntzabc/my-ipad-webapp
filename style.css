@@ -518,26 +518,23 @@ body.glass-3 .fcard::before {
   opacity: 0; transition: opacity .3s ease;
 }
 .sheet.is-open .sheet__scrim { opacity: 1; }
+/* 全屏面板：进场就是满屏，不靠手势去拉 */
 .sheet__panel {
-  position: absolute; left: 50%; bottom: 0;
-  width: min(100%, 820px); height: 94%;
-  border-radius: 28px 28px 0 0;
-  border: .5px solid rgba(255,255,255,.17);
-  border-bottom: none;
+  position: absolute; inset: 0;
+  background-color: rgba(5,11,24,.58);
+  width: 100%; height: 100%;
+  border-radius: 0;
+  border: none;
   display: flex; flex-direction: column;
   overflow: hidden;
-  transform: translate(-50%, 100%);
-  transition: transform .36s cubic-bezier(.32,.72,0,1);
-  box-shadow: 0 -10px 64px rgba(0,0,0,.62), inset 0 .5px 0 var(--rim);
+  transform: translateY(100%);
+  transition: transform .34s cubic-bezier(.32,.72,0,1);
+  box-shadow: none;
 }
-.sheet.is-open .sheet__panel { transform: translate(-50%, 0); }
-.sheet__grabber {
-  width: 38px; height: 5px; border-radius: 3px;
-  background: rgba(255,255,255,.26); margin: 8px auto 2px; flex: none;
-}
+.sheet.is-open .sheet__panel { transform: translateY(0); }
 .sheet__head {
   flex: none; display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px 12px;
+  padding: calc(var(--safe-top) + 10px) 16px 12px;
   border-bottom: .5px solid var(--line);
 }
 .sheet__icon {
@@ -566,8 +563,10 @@ body.glass-3 .fcard::before {
 .sheet__body {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
-  padding: 16px 16px calc(var(--safe-bottom) + 26px);
+  padding: 16px 16px calc(var(--safe-bottom) + 30px);
 }
+/* 宽屏时内容居中，别拉到难以阅读的行宽 */
+.sheet__body > * { max-width: 980px; margin-left: auto; margin-right: auto; }
 
 /* ---------- 面板内通用件 ---------- */
 .chiprow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
@@ -721,3 +720,199 @@ body.glass-3 .fcard::before {
   -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
 }
 .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+
+/* ============================================================
+   全屏面板里的通用控件
+   ============================================================ */
+
+/* 阶段提示条 */
+.phasebar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 14px; border-radius: 13px; margin-bottom: 12px;
+  border: .5px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.055);
+}
+.phasebar b { font-size: 14.5px; }
+.phasebar span { font-size: 12.5px; color: var(--text-3); }
+.phasebar.is-setup { border-color: rgba(255,190,90,.35); background: rgba(255,180,70,.10); }
+.phasebar.is-setup b { color: #FFC46B; }
+.phasebar.is-run { border-color: rgba(120,255,200,.30); background: rgba(120,255,200,.08); }
+.phasebar.is-run b { color: #7CFFC8; }
+
+/* 行内小标签 */
+.rowlabel { font-size: 12.5px; color: var(--text-3); align-self: center; margin-right: 2px; }
+.chip--sm { font-size: 13px; padding: 7px 11px; border-radius: 10px; }
+.chip:disabled { opacity: .45; }
+
+.mainrow { display: flex; gap: 10px; margin-top: 14px; align-items: stretch; }
+.mainrow .btn { flex: 1; }
+.mainrow .chip { flex: none; min-width: 96px; display: grid; place-items: center; }
+
+.btn--pause {
+  background: rgba(255,255,255,.10);
+  border: .5px solid rgba(255,255,255,.18);
+  color: var(--text);
+  box-shadow: inset 0 .5px 0 rgba(255,255,255,.24);
+}
+.btn--pause.is-paused {
+  background: linear-gradient(180deg, var(--accent), #3568D8);
+  color: #fff;
+  border-color: rgba(155,195,255,.5);
+}
+
+/* 笔宽 / 强度 行 */
+.penbox {
+  display: flex; align-items: center; gap: 8px;
+  margin-left: auto;
+}
+.penbox__k { font-size: 12.5px; color: var(--text-3); }
+
+.slider {
+  -webkit-appearance: none; appearance: none;
+  width: 130px; height: 26px; background: transparent;
+  accent-color: var(--accent);
+}
+.slider::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px; background: rgba(255,255,255,.18);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 22px; height: 22px; margin-top: -9px;
+  border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+
+/* ============================================================
+   摄像头：启动块 + 预览窗
+   ============================================================ */
+.camstart {
+  margin-top: 14px; padding: 18px 16px;
+  border-radius: 16px; text-align: center;
+  border: .5px dashed rgba(150,195,255,.35);
+  background: rgba(91,155,255,.07);
+}
+.camstart .btn { max-width: 340px; margin: 0 auto; }
+.camstart .note { margin-top: 10px; }
+
+.campreview {
+  position: relative;
+  width: 100%; max-width: 360px;
+  aspect-ratio: 4 / 3;
+  margin: 14px auto 0;
+  border-radius: 16px; overflow: hidden;
+  border: .5px solid rgba(255,255,255,.14);
+  background: #050B18;
+  display: block;
+}
+/* 未开启时把它挪出屏幕 —— 千万不能用 display:none！
+   隐藏的 video 在 Safari 里不解码帧，drawImage 会抓到全黑。 */
+.campreview:not(.is-on) {
+  position: fixed;
+  left: -3000px; top: 0;
+  width: 320px; height: 240px;
+  margin: 0; opacity: 0;
+  pointer-events: none;
+}
+.campreview--sm { max-width: 210px; }
+.campreview video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);          /* 前置摄像头镜像，看着才自然 */
+  display: block;
+}
+.campreview--sm video { transform: none; }   /* 后置摄像头不用镜像 */
+
+.campreview__dot {
+  position: absolute; left: 50%; top: 50%;
+  width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.45);
+  background: rgba(255,255,255,.08);
+  transition: border-color .1s ease, background-color .1s ease;
+  pointer-events: none;
+}
+.campreview__dot.is-lock {
+  border-color: #7CFFC8;
+  background: rgba(124,255,200,.28);
+  box-shadow: 0 0 12px rgba(124,255,200,.55);
+}
+
+.campreview__bar {
+  position: absolute; left: 0; bottom: 0; height: 3px; width: 0;
+  background: linear-gradient(90deg, #5B9BFF, #7CFFC8);
+  transition: width .1s linear;
+}
+
+/* ============================================================
+   音准挑战
+   ============================================================ */
+.challenge {
+  margin-top: 14px; padding: 16px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.05);
+  border: .5px solid rgba(255,255,255,.11);
+}
+.challenge__t { font-size: 12px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+.challenge__n {
+  font-size: 40px; font-weight: 700; letter-spacing: -1.2px;
+  color: var(--accent-2); line-height: 1.1;
+}
+.challenge__n span { font-size: 14px; font-weight: 500; color: var(--text-3); margin-left: 10px; letter-spacing: 0; }
+.challenge__bar {
+  margin-top: 12px; height: 8px; border-radius: 4px;
+  background: rgba(255,255,255,.10); overflow: hidden;
+}
+.challenge__bar i {
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, #5B9BFF, #7CFFC8);
+  transition: width .08s linear;
+}
+.challenge__d { margin-top: 9px; font-size: 12.5px; color: var(--text-3); }
+
+/* ============================================================
+   iPad 适配
+   ============================================================ */
+
+/* 平板及更宽：整体放大一点呼吸感 */
+@media (min-width: 700px) {
+  .sheet__head { padding: calc(var(--safe-top) + 14px) 26px 16px; }
+  .sheet__body { padding: 20px 26px calc(var(--safe-bottom) + 36px); }
+  .sheet__titles h2 { font-size: 20px; }
+  .fgrid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 15px; }
+  .fcard { min-height: 168px; padding: 20px 19px 18px; }
+  .fcard__icon { width: 44px; height: 44px; border-radius: 13px; }
+  .fcard__icon svg { width: 24px; height: 24px; }
+  .fcard__name { font-size: 17.5px; }
+  .fcard__desc { font-size: 13px; }
+  .statgrid { grid-template-columns: repeat(4, 1fr); }
+  .stat__v { font-size: 19px; }
+  .chip { font-size: 14.5px; padding: 10px 16px; }
+  .chip--sm { font-size: 13.5px; padding: 8px 12px; }
+  .campreview { max-width: 420px; }
+  .campreview--sm { max-width: 240px; }
+}
+
+/* 横屏：画布给足高度，控件横向排开 */
+@media (orientation: landscape) and (min-width: 900px) {
+  .screens { padding-left: 28px; padding-right: 28px; }
+  .topbar { padding-left: 28px; padding-right: 28px; }
+  .sheet__body > * { max-width: 1120px; }
+  .campreview--sm { max-width: 210px; }
+  .challenge__n { font-size: 34px; }
+}
+
+/* 横屏时左右安全区（iPad 横屏有圆角与指示条） */
+@supports (padding: env(safe-area-inset-left)) {
+  .sheet__head, .sheet__body {
+    padding-left: calc(env(safe-area-inset-left) + 16px);
+    padding-right: calc(env(safe-area-inset-right) + 16px);
+  }
+  @media (min-width: 700px) {
+    .sheet__head { padding-left: calc(env(safe-area-inset-left) + 26px);
+                   padding-right: calc(env(safe-area-inset-right) + 26px); }
+    .sheet__body { padding-left: calc(env(safe-area-inset-left) + 26px);
+                   padding-right: calc(env(safe-area-inset-right) + 26px); }
+  }
+}

@@ -17,7 +17,7 @@ const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 
 const html = read('index.html');
 const app = read('app.js');
-const feats = read('features.js');
+const feats = read('features.js') + '\n' + read('features-cam.js');
 const css = read('style.css');
 const sw = read('sw.js');
 
@@ -82,7 +82,7 @@ htmlClasses.forEach(c => ok(cssClasses.has(c), 'index.html 的 .' + c + ' 在 st
 
 /* ---------- 5. 脚本都被引进来了 ---------- */
 console.log('\n【脚本与缓存检查】');
-['ai.js', 'particles.js', 'features.js', 'app.js'].forEach(f => {
+['ai.js', 'sense.js', 'particles.js', 'features.js', 'features-cam.js', 'app.js'].forEach(f => {
   ok(html.indexOf('src="' + f + '"') >= 0, 'index.html 引用了 ' + f);
   ok(sw.indexOf("'./" + f + "'") >= 0 || sw.indexOf('"./' + f + '"') >= 0,
      'sw.js 离线缓存收录了 ' + f);
@@ -91,8 +91,10 @@ console.log('\n【脚本与缓存检查】');
 /* ---------- 6. 功能定义完整性 ---------- */
 console.log('\n【功能定义检查】');
 require(path.join(root, 'features.js'));
+require(path.join(root, 'sense.js'));
+require(path.join(root, 'features-cam.js'));
 const FEATURES = globalThis.FEATURES || [];
-ok(FEATURES.length >= 4, '至少定义了 4 个玩法（实际 ' + FEATURES.length + ' 个）');
+ok(FEATURES.length >= 8, '至少定义了 8 个玩法（实际 ' + FEATURES.length + ' 个）');
 FEATURES.forEach(f => {
   ok(!!f.id && !!f.name && !!f.cat, '功能 ' + f.id + ' 的 id/name/cat 齐全');
   ok(typeof f.render === 'function', '功能 ' + f.id + ' 有 render 函数');
@@ -106,7 +108,9 @@ ok(new Set(ids).size === ids.length, '功能 id 没有重复');
 console.log('\n【资源清理检查】');
 FEATURES.forEach(f => {
   const at = feats.indexOf("id: '" + f.id + "'");
-  const nextAdd = feats.indexOf('\n  add({', at);
+  let nextAdd = feats.indexOf('\n  add({', at);
+  const n2 = feats.indexOf('\n  F.push({', at);
+  if (nextAdd < 0 || (n2 > 0 && n2 < nextAdd)) nextAdd = n2;
   const seg = feats.slice(at, nextAdd > 0 ? nextAdd : feats.length);
   const hasLoop = /requestAnimationFrame|setInterval/.test(seg);
   const hasCleanup = /return \(\) =>/.test(seg);
