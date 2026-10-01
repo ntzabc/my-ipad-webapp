@@ -15,6 +15,10 @@ function ok(c, label, extra) {
   if (c) { pass++; console.log('  ✓ ' + label); }
   else { fail++; console.log('  ✗ ' + label + (extra ? '\n      ' + extra : '')); }
 }
+function eq(a, b, label) {
+  if (a === b) { pass++; console.log('  ✓ ' + label); }
+  else { fail++; console.log('  ✗ ' + label + '\n      期望 ' + b + '，实际 ' + a); }
+}
 function near(a, b, tol, label) {
   if (Math.abs(a - b) <= tol) { pass++; console.log('  ✓ ' + label); }
   else { fail++; console.log('  ✗ ' + label + '\n      期望 ' + b + ' ± ' + tol + '，实际 ' + a); }
@@ -80,31 +84,155 @@ G('肤色判定');
 })();
 
 /* ============================================================ */
-G('头部定位');
+G('肤色连通域');
 
-(function headTrack() {
+(function blobs() {
   const W = 96, H = 72;
   const img = makeImg(W, H, [40, 45, 60]);
-  // 在左上角放一个"脸"
   blob(img, 24, 20, 12, [208, 156, 128]);
-  const r = S.skinCentroid(img, { step: 1 });
-  ok(r !== null, '能检测到肤色块');
-  if (r) {
-    near(r.x, 0.25, 0.05, '重心 x ≈ 0.25（左）');
-    near(r.y, 20 / 72, 0.06, '重心 y ≈ 0.28（上）');
-    ok(r.mass > 0.02, '报道了肤色占比 ' + (r.mass * 100).toFixed(1) + '%');
+
+  const list = S.skinBlobs(img, { cell: 4, sample: 2 });
+  ok(list.length === 1, '画面里只有一块肤色时返回 1 个连通域');
+  if (list.length) {
+    near(list[0].x, 0.25, 0.05, '连通域重心 x ≈ 0.25');
+    near(list[0].y, 20 / 72, 0.07, '连通域重心 y ≈ 0.28');
+    ok(list[0].bw > 0.15 && list[0].bh > 0.15, '包围盒尺寸合理');
+    ok(list[0].cb > 60 && list[0].cb < 140, '回报了 Cb 均值 ' + list[0].cb.toFixed(1));
   }
 
-  // 移到右下角
+  // 两块肤色：应按像素数排序，最大的在前
   const img2 = makeImg(W, H, [40, 45, 60]);
-  blob(img2, 72, 52, 12, [208, 156, 128]);
-  const r2 = S.skinCentroid(img2, { step: 1 });
-  ok(r2 !== null && r2.x > 0.6 && r2.y > 0.6, '移动到右下后重心跟着变（x=' +
-     (r2 ? r2.x.toFixed(2) : '—') + ', y=' + (r2 ? r2.y.toFixed(2) : '—') + '）');
+  blob(img2, 20, 18, 14, [208, 156, 128]);
+  blob(img2, 78, 56, 7, [200, 150, 125]);
+  const l2 = S.skinBlobs(img2, { cell: 4, sample: 2 });
+  ok(l2.length >= 2, '两块肤色被分成两个连通域（实际 ' + l2.length + ' 个）');
+  if (l2.length >= 2) {
+    ok(l2[0].count > l2[1].count, '按像素数从大到小排序');
+    ok(Math.abs(l2[0].x - 20 / 96) < 0.08, '最大的一块是左边那个大的');
+  }
 
-  // 没有肤色时应返回 null
-  const img3 = makeImg(W, H, [30, 60, 120]);
-  ok(S.skinCentroid(img3, { step: 1 }) === null, '画面里没有肤色时返回 null');
+  // 没有肤色
+  ok(S.skinBlobs(makeImg(W, H, [30, 60, 120]), { cell: 4, sample: 2 }).length === 0,
+     '没有肤色时返回空数组');
+
+  // 搜索窗能把远处的干扰排除掉
+  const l3 = S.skinBlobs(img2, { cell: 4, sample: 2, window: { x: 0.2, y: 0.25, r: 0.25 } });
+  ok(l3.length === 1, '限定搜索窗后只剩脸那一块（干扰被排除）');
+})();
+
+/* ============================================================ */
+G('头部追踪器');
+
+(function trackerLock() {
+  const W = 96, H = 72;
+  const t = new S.HeadTracker();
+
+  // 第一帧：脸在左上
+  const f1 = makeImg(W, H, [40, 45, 60]);
+  blob(f1, 30, 24, 13, [208, 156, 128]);
+  const r1 = t.update(f1);
+  ok(r1 !== null, '第一帧就能锁定');
+  if (r1) {
+    near(r1.x, 30 / 96, 0.09, '锁定位置 x 正确');
+    ok(r1.conf > 0, '置信度开始累积（' + r1.conf.toFixed(2) + '）');
+  }
+
+  // 连续移动，追踪器应该跟上去
+  let last = r1;
+  for (let k = 1; k <= 8; k++) {
+    const f = makeImg(W, H, [40, 45, 60]);
+    blob(f, 30 + k * 4, 24 + k * 2, 13, [208, 156, 128]);
+    last = t.update(f);
+    if (!last) break;
+  }
+  ok(last !== null, '移动过程中没有跟丢');
+  if (last) {
+    near(last.x, (30 + 8 * 4) / 96, 0.14, '跟到了新位置 x');
+    ok(last.conf > 0.3, '持续锁定时置信度上升（' + last.conf.toFixed(2) + '）');
+  }
+})();
+
+(function trackerRejectsDistractor() {
+  const W = 96, H = 72;
+  const t = new S.HeadTracker();
+
+  // 先在中间锁定一张脸
+  for (let i = 0; i < 6; i++) {
+    const f = makeImg(W, H, [40, 45, 60]);
+    blob(f, 48, 34, 13, [208, 156, 128]);
+    t.update(f);
+  }
+  const before = { x: t.x, y: t.y };
+
+  // 右下角突然出现一块很大的"肤色"干扰（比如木桌、手）
+  const f2 = makeImg(W, H, [40, 45, 60]);
+  blob(f2, 48, 34, 13, [208, 156, 128]);
+  blob(f2, 84, 62, 16, [206, 152, 126]);
+  const r = t.update(f2);
+
+  ok(r !== null, '有干扰时依然锁定着目标');
+  if (r) {
+    near(r.x, before.x, 0.10, '重心没有被右下角的干扰拽走（x 保持）');
+    near(r.y, before.y, 0.12, '重心没有被拽走（y 保持）');
+    ok(r.x < 0.7, '没有跳到干扰所在的位置');
+  }
+})();
+
+(function trackerSelfHeal() {
+  const W = 96, H = 72;
+  const t = new S.HeadTracker();
+  // 一开始没有脸
+  const empty = makeImg(W, H, [40, 45, 60]);
+  for (let i = 0; i < 5; i++) ok(t.update(empty) === null, i === 0 ? '没有脸时返回 null' : '仍然返回 null');
+  ok(t.lost > 0, '记录了丢失帧数');
+
+  // 脸出现后应该能重新锁定
+  const f = makeImg(W, H, [40, 45, 60]);
+  blob(f, 60, 40, 13, [208, 156, 128]);
+  const r = t.update(f);
+  ok(r !== null, '脸出现后能重新锁定');
+  ok(t.lost === 0, '丢失计数被清零');
+})();
+
+(function eyeRegionTest() {
+  const W = 96, H = 72;
+  const img = makeImg(W, H, [40, 45, 60]);
+  blob(img, 48, 34, 14, [208, 156, 128]);
+  // 在脸框上半部画两个暗点当眼睛
+  blob(img, 43, 27, 2, [40, 32, 28]);
+  blob(img, 53, 27, 2, [40, 32, 28]);
+
+  const box = { x: 48 / 96, y: 34 / 72, bw: 28 / 96, bh: 28 / 72 };
+  const e = S.eyeRegion(img, box);
+  ok(e !== null, '能估计出眼睛区域');
+  if (e) {
+    near(e.y, 27 / 72, 0.10, '眼睛行位置正确');
+    ok(Math.abs(e.gazeX) < 1.01 && Math.abs(e.gazeY) < 1.01, '视线偏移归一化在 -1..1 内');
+  }
+  ok(S.eyeRegion(img, null) === null, '没有脸框时返回 null');
+})();
+
+/* ============================================================ */
+G('神经网络输入预处理');
+
+(function graySmall() {
+  const W = 32, H = 32;
+  const img = makeImg(W, H, [0, 0, 0]);
+  blob(img, 16, 16, 8, [255, 255, 255]);
+  const g = S.grayscaleSmall(img, 8, 8);
+  eq(g.length, 64, '降采样到 8x8 = 64 维');
+  let allIn = true;
+  for (let i = 0; i < g.length; i++) if (g[i] < 0 || g[i] > 1) allIn = false;
+  ok(allIn, '所有取值都在 0..1');
+  const center = g[3 * 8 + 3] + g[3 * 8 + 4] + g[4 * 8 + 3] + g[4 * 8 + 4];
+  const corner = g[0] + g[7] + g[56] + g[63];
+  ok(center > corner, '中间亮块比四角亮');
+
+  const n = S.normalizeGray(g);
+  eq(n.length, 64, '亮度均衡后维度不变');
+  let sum = 0;
+  for (let i = 0; i < n.length; i++) sum += n[i];
+  ok(sum / n.length > 0.2 && sum / n.length < 0.8, '均衡后均值落在中间区间');
 })();
 
 /* ============================================================ */

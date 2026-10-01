@@ -1,12 +1,13 @@
 /* 极简离线缓存：让加到主屏幕的 App 断网也能打开 */
 
-const CACHE = 'ailab-v2';
+const CACHE = 'ailab-v3';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './ai.js',
   './sense.js',
+  './vision.js',
   './particles.js',
   './features.js',
   './features-cam.js',

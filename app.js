@@ -195,7 +195,7 @@
   const EMPTY_SEARCH = q =>
     '<div class="empty">' + iconSvg(ICON_SEARCH, 1.6) +
     '<div class="empty__title">没找到「' + escapeHtml(q) + '」</div>' +
-    '<div class="empty__desc">换个词试试：「神经网络」「棋」「猜拳」「寻路」</div></div>';
+    '<div class="empty__desc">换个词试试：「神经网络」「猜拳」「寻路」「3D」「摄像头」「拍手」</div></div>';
 
   function renderAll() {
     const q = $('#search').value;
@@ -262,7 +262,14 @@
      ============================================================ */
   const sheet = $('#sheet');
 
+  /* 关面板时有一段退场动画，动画结束后才真正隐藏并清空内容。
+     但用户完全可能在 380ms 内就点开了下一个玩法 ——
+     那样这次的清理定时器会把刚渲染好的新面板一起清掉，
+     表现就是"点快了会看到一片空白"。所以用一个令牌把过期的清理作废。 */
+  let sheetToken = 0;
+
   function openSheet() {
+    sheetToken++;
     sheet.hidden = false;
     document.body.classList.add('is-locked');
     if (field) field.setLowPower(true);
@@ -276,7 +283,12 @@
     if (field) field.setLowPower(false);
     if (S.cleanup) { try { S.cleanup(); } catch (_) {} S.cleanup = null; }
     S.feature = null;
-    setTimeout(() => { sheet.hidden = true; $('#sheetBody').innerHTML = ''; }, 380);
+    const token = ++sheetToken;
+    setTimeout(() => {
+      if (token !== sheetToken) return;      // 期间又打开了别的功能，这次清理作废
+      sheet.hidden = true;
+      $('#sheetBody').innerHTML = '';
+    }, 380);
     if (pop && location.hash.indexOf('#f/') === 0) history.back();
   }
 

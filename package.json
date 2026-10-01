@@ -1,0 +1,13 @@
+{
+  "name": "ai-lab",
+  "version": "3.0.0",
+  "private": true,
+  "description": "跑在 iPad 本地的 AI 游乐场：手写神经网络、神经进化、计算机视觉、传感器玩法。纯静态，无构建步骤。",
+  "scripts": {
+    "test": "node tests/all.js",
+    "serve": "python -m http.server 8899"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

@@ -82,7 +82,7 @@ htmlClasses.forEach(c => ok(cssClasses.has(c), 'index.html 的 .' + c + ' 在 st
 
 /* ---------- 5. 脚本都被引进来了 ---------- */
 console.log('\n【脚本与缓存检查】');
-['ai.js', 'sense.js', 'particles.js', 'features.js', 'features-cam.js', 'app.js'].forEach(f => {
+['ai.js', 'sense.js', 'vision.js', 'particles.js', 'features.js', 'features-cam.js', 'app.js'].forEach(f => {
   ok(html.indexOf('src="' + f + '"') >= 0, 'index.html 引用了 ' + f);
   ok(sw.indexOf("'./" + f + "'") >= 0 || sw.indexOf('"./' + f + '"') >= 0,
      'sw.js 离线缓存收录了 ' + f);
@@ -92,7 +92,18 @@ console.log('\n【脚本与缓存检查】');
 console.log('\n【功能定义检查】');
 require(path.join(root, 'features.js'));
 require(path.join(root, 'sense.js'));
+require(path.join(root, 'vision.js'));
 require(path.join(root, 'features-cam.js'));
+
+const vision = require(path.join(root, 'vision.js')) || globalThis.Vision;
+ok(!!globalThis.Vision, 'vision.js 导出了 Vision');
+['toGray', 'edgeMap', 'houghLines', 'findRegions', 'buildRelief'].forEach(k =>
+  ok(typeof (globalThis.Vision || {})[k] === 'function', 'Vision.' + k + ' 存在'));
+
+const sense = globalThis.Sense || {};
+['skinBlobs', 'HeadTracker', 'eyeRegion', 'grayscaleSmall', 'normalizeGray',
+ 'trackHue', 'trackBrightest', 'autoPickHue'].forEach(k =>
+  ok(typeof sense[k] === 'function', 'Sense.' + k + ' 存在'));
 const FEATURES = globalThis.FEATURES || [];
 ok(FEATURES.length >= 8, '至少定义了 8 个玩法（实际 ' + FEATURES.length + ' 个）');
 FEATURES.forEach(f => {
@@ -103,6 +114,12 @@ FEATURES.forEach(f => {
 });
 const ids = FEATURES.map(f => f.id);
 ok(new Set(ids).size === ids.length, '功能 id 没有重复');
+
+const catMatch = app.match(/const CAT_ORDER = \[([^\]]+)\]/);
+const cats = catMatch ? catMatch[1].split(',').map(s => s.trim().replace(/^'|'$/g, '')) : [];
+ok(cats.length > 0, '解析出 app.js 的分类顺序（' + cats.join(' / ') + '）');
+FEATURES.forEach(f => ok(cats.indexOf(f.cat) >= 0,
+  '功能 ' + f.id + ' 的分类「' + f.cat + '」在 CAT_ORDER 里'));
 
 /* ---------- 7. 每个 render 都返回清理函数 ---------- */
 console.log('\n【资源清理检查】');
@@ -116,6 +133,22 @@ FEATURES.forEach(f => {
   const hasCleanup = /return \(\) =>/.test(seg);
   ok(!hasLoop || hasCleanup,
      '功能 ' + f.id + (hasLoop ? ' 用了循环，必须有清理函数' : ' 无循环，无需清理'));
+
+  // 摄像头和麦克风不关掉的话，指示灯一直亮着、电池一直掉
+  const clean = hasCleanup ? seg.slice(seg.lastIndexOf('return () =>')) : '';
+  if (/new S\.Camera\(/.test(seg)) {
+    ok(/\.stop\(\)/.test(clean), '功能 ' + f.id + ' 的清理函数关掉了摄像头');
+  }
+  if (/new S\.Mic\(/.test(seg)) {
+    ok(/\.stop\(\)/.test(clean), '功能 ' + f.id + ' 的清理函数关掉了麦克风');
+  }
+  // 面板是全屏的，别写成固定小画布
+  if (/\.camstart/.test(seg) && /new S\.Camera\(/.test(seg)) {
+    ok(/无法|打不开/.test(seg), '功能 ' + f.id + ' 在摄像头失败时给了提示文案');
+  }
+  // 隐藏的 video 在 Safari 里不解码帧 —— 功能代码里不能出现 display:none
+  ok(!/\.video\.style\.display\s*=\s*'none'/.test(seg),
+     '功能 ' + f.id + ' 没有把 video 设成 display:none（Safari 会不解码帧）');
 });
 
 /* ---------- 结果 ---------- */
